@@ -1,1536 +1,1554 @@
 # BÁO CÁO THIẾT KẾ HỆ THỐNG CHATBOT TƯ VẤN THÔNG TIN TRƯỜNG PTIT
 
-## Nhóm thực hiện
-1. **Nguyễn Thị Trang** - Mã SV: 20210001 - Module Quản lý người dùng và xác thực
-2. **Lê Văn Trọng** - Mã SV: 20210002 - Module Xử lý ngôn ngữ tự nhiên (NLP) và trả lời
-3. **Phạm Văn Thuân** - Mã SV: 20210003 - Module Quản lý cơ sở tri thức và dữ liệu
+## PHẦN 1: THIẾT KẾ KIẾN TRÚC HỆ THỐNG (CHUNG CHO CẢ NHÓM)
 
----
+### 1.1. Tổng quan kiến trúc
 
-# PHẦN 1: THIẾT KẾ KIẾN TRÚC HỆ THỐNG (CHUNG)
-
-## 1.1 Tổng quan hệ thống
-
-Hệ thống thương mại điện tử được xây dựng theo kiến trúc Client-Server 3 tầng (3-tier architecture):
-
-- **Tầng Presentation (Client)**: Giao diện người dùng, xây dựng bằng React/Vue.js
-- **Tầng Business Logic (Server)**: Xử lý nghiệp vụ, xây dựng bằng Node.js/Express hoặc Java Spring Boot
-- **Tầng Data**: Cơ sở dữ liệu MySQL/PostgreSQL
-
-## 1.2 Sơ đồ kiến trúc tổng quan
+Hệ thống Chatbot tư vấn thông tin trường PTIT được xây dựng dựa trên kiến trúc RAG (Retrieval-Augmented Generation) với các thành phần chính sau:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     CLIENT LAYER                            │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
-│  │   Web    │  │  Mobile  │  │  Admin   │  │   API    │   │
-│  │   App    │  │   App    │  │  Panel   │  │  Client  │   │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+│                        Client Layer                           │
+├─────────────────────────────────────────────────────────────┤
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │   Web UI     │  │   Admin UI   │  │  Mobile App  │      │
+│  │ (Streamlit)  │  │              │  │   (Future)   │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
 └─────────────────────────────────────────────────────────────┘
-                             │
-                    ┌────────▼────────┐
-                    │   Load Balancer │
-                    └────────┬────────┘
-                             │
+                              │
+                    ┌─────────▼─────────┐
+                    │   API Gateway      │
+                    │   (WebSocket)      │
+                    └─────────┬─────────┘
+                              │
 ┌─────────────────────────────────────────────────────────────┐
-│                     SERVER LAYER                            │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │                  API Gateway                         │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                             │                               │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│  │  Auth    │  │  User    │  │ Product  │  │  Order   │  │
-│  │ Service  │  │ Service  │  │ Service  │  │ Service  │  │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  │
+│                     Application Layer                         │
+├─────────────────────────────────────────────────────────────┤
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │ Conversation │  │   Context    │  │   Response   │      │
+│  │   Handler    │  │  Synthesis   │  │  Generator   │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │    Query     │  │  Document    │  │   Admin      │      │
+│  │   Refiner    │  │   Loader     │  │  Services    │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
 └─────────────────────────────────────────────────────────────┘
-                             │
+                              │
 ┌─────────────────────────────────────────────────────────────┐
-│                      DATA LAYER                             │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│  │  User    │  │ Product  │  │  Order   │  │  Cache   │  │
-│  │    DB    │  │    DB    │  │    DB    │  │  (Redis) │  │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  │
+│                      Core Services Layer                      │
+├─────────────────────────────────────────────────────────────┤
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │   LLM Client │  │   Embedder   │  │    Chat      │      │
+│  │  (LlamaCpp)  │  │   Service    │  │   History    │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+└─────────────────────────────────────────────────────────────┘
+                              │
+┌─────────────────────────────────────────────────────────────┐
+│                       Data Layer                              │
+├─────────────────────────────────────────────────────────────┤
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │Vector Store  │  │  Document    │  │    Model     │      │
+│  │  (Chroma)    │  │   Storage    │  │   Storage    │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## 1.3 Công nghệ sử dụng
+### 1.2. Luồng xử lý chính
 
-### Frontend (Client)
-- Framework: React.js / Vue.js
-- State Management: Redux / Vuex
-- UI Library: Material-UI / Ant Design
-- HTTP Client: Axios
+1. **Luồng xử lý câu hỏi của người dùng:**
+   - Người dùng nhập câu hỏi qua giao diện Web UI
+   - Câu hỏi được gửi qua WebSocket tới Application Layer
+   - Query Refiner tinh chỉnh câu hỏi để tối ưu cho việc tìm kiếm
+   - Embedder Service chuyển đổi câu hỏi thành vector embedding
+   - Vector Store (Chroma) tìm kiếm các đoạn văn bản liên quan nhất
+   - Context Synthesis Strategy tổng hợp context từ các đoạn văn bản
+   - LLM Client (LlamaCpp) sinh câu trả lời dựa trên context
+   - Response được trả về cho người dùng qua WebSocket
 
-### Backend (Server)
-- Platform: Node.js với Express.js
-- Authentication: JWT (JSON Web Token)
-- ORM: Sequelize / TypeORM
-- API Documentation: Swagger
+2. **Luồng xử lý dữ liệu đầu vào:**
+   - Admin upload tài liệu (PDF, MD, TXT) về thông tin trường PTIT
+   - Document Loader đọc và xử lý tài liệu
+   - Text Splitter chia tài liệu thành các chunks nhỏ
+   - Embedder Service tạo embeddings cho mỗi chunk
+   - Lưu embeddings và metadata vào Vector Store
 
-### Database
-- Primary DB: MySQL / PostgreSQL
-- Cache: Redis
-- File Storage: AWS S3 / Local Storage
+### 1.3. Các công nghệ sử dụng
 
-## 1.4 Phân chia module
+- **Frontend:** Streamlit (Web UI)
+- **Backend:** Python 3.10+
+- **LLM Framework:** llama-cpp-python
+- **Vector Database:** ChromaDB
+- **Embeddings Model:** all-MiniLM-L6-v2
+- **LLM Models:** Llama 3.1, Qwen 2.5, OpenChat 3.6
+- **Communication:** WebSocket, REST API
 
-| Module | Người phụ trách | Chức năng chính |
-|--------|----------------|-----------------|
-| Quản lý người dùng | Nguyễn Thị Trang | Đăng ký, đăng nhập, quản lý profile, phân quyền |
-| Quản lý sản phẩm | Lê Văn Trọng | CRUD sản phẩm, danh mục, tìm kiếm, lọc |
-| Quản lý đơn hàng | Phạm Văn Thuân | Giỏ hàng, đặt hàng, thanh toán, theo dõi đơn |
+### 1.4. Các patterns và nguyên tắc thiết kế
+
+- **Singleton Pattern:** Áp dụng cho LLM Client, Vector Store
+- **Strategy Pattern:** Context Synthesis Strategies
+- **Factory Pattern:** Model Registry
+- **Repository Pattern:** Document Storage, Vector Database
+- **SOLID Principles:**
+  - Single Responsibility: Mỗi class chỉ đảm nhận một chức năng
+  - Open/Closed: Dễ dàng mở rộng thêm model, strategy mới
+  - Dependency Inversion: Sử dụng abstraction cho các dependencies
 
 ---
 
-# PHẦN 2: THIẾT KẾ CHI TIẾT
+## PHẦN 2: THIẾT KẾ CHI TIẾT - BẠN THỨ NHẤT
 
-## 2.1 THIẾT KẾ CHI TIẾT - NGUYỄN THỊ TRANG (MÃ SV: 20210001)
-### Module: Quản lý người dùng
+**Họ tên:** Nguyễn Văn A
+**Mã SV:** B21DCCN001
+**Phụ trách:** Module RAG Core và Vector Database
 
-### 2.1.1 Thiết kế CSDL
+### 2.1. Thiết kế CSDL liên quan module
 
-#### Bảng Users
+#### 2.1.1. Schema Vector Database (ChromaDB)
+
 ```sql
-CREATE TABLE users (
-    user_id INT PRIMARY KEY AUTO_INCREMENT,
-    username VARCHAR(50) UNIQUE NOT NULL,
-    email VARCHAR(100) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    full_name VARCHAR(100),
-    phone VARCHAR(20),
-    address TEXT,
-    role_id INT,
-    status ENUM('active', 'inactive', 'banned') DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (role_id) REFERENCES roles(role_id)
+-- Collection: documents_embeddings
+CREATE TABLE documents_embeddings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    embedding VECTOR(384), -- 384 dimensions for all-MiniLM-L6-v2
+    document TEXT NOT NULL,
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Index for vector similarity search
+CREATE INDEX idx_embedding_cosine ON documents_embeddings
+USING ivfflat (embedding vector_cosine_ops)
+WITH (lists = 100);
+
+-- Metadata structure
+-- {
+--   "source": "student_handbook.pdf",
+--   "page": 12,
+--   "chapter": "Quy chế đào tạo",
+--   "section": "Điều kiện tốt nghiệp",
+--   "chunk_id": "doc_001_chunk_042",
+--   "created_date": "2024-01-15"
+-- }
 ```
 
-#### Bảng Roles
+#### 2.1.2. Schema Chat History
+
 ```sql
-CREATE TABLE roles (
-    role_id INT PRIMARY KEY AUTO_INCREMENT,
-    role_name VARCHAR(50) UNIQUE NOT NULL,
-    description TEXT,
+CREATE TABLE chat_sessions (
+    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE chat_messages (
+    message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID REFERENCES chat_sessions(session_id),
+    role VARCHAR(50) NOT NULL, -- 'user', 'assistant', 'system'
+    content TEXT NOT NULL,
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_session_messages ON chat_messages(session_id, created_at);
+```
+
+### 2.2. Thiết kế lớp thực thể
+
+#### 2.2.1. Document Entity
+
+```python
+from dataclasses import dataclass
+from typing import Dict, Any, Optional
+from datetime import datetime
+
+@dataclass
+class Document:
+    """Entity representing a document chunk"""
+    page_content: str
+    metadata: Dict[str, Any]
+    embedding: Optional[List[float]] = None
+    document_id: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    def to_dict(self) -> Dict:
+        return {
+            'page_content': self.page_content,
+            'metadata': self.metadata,
+            'embedding': self.embedding,
+            'document_id': self.document_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+```
+
+#### 2.2.2. ChatMessage Entity
+
+```python
+@dataclass
+class ChatMessage:
+    """Entity representing a chat message"""
+    role: str  # 'user', 'assistant', 'system'
+    content: str
+    session_id: Optional[str] = None
+    message_id: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: Optional[datetime] = None
+```
+
+### 2.3. Chức năng 1: Similarity Search với Vector Database
+
+#### 2.3.1. Thiết kế giao diện
+
+```
+┌─────────────────────────────────────────────┐
+│          SIMILARITY SEARCH INTERFACE         │
+├─────────────────────────────────────────────┤
+│                                              │
+│  Query: [________________________] [Search] │
+│                                              │
+│  Advanced Options:                          │
+│  ├─ Top K Results: [5 ▼]                   │
+│  ├─ Threshold: [0.7 ▼]                     │
+│  └─ Filter by: [All Categories ▼]          │
+│                                              │
+│  Results:                                    │
+│  ┌────────────────────────────────────────┐ │
+│  │ 📄 Document: student_handbook.pdf      │ │
+│  │    Score: 0.92                         │ │
+│  │    Preview: "Điều kiện tốt nghiệp..."  │ │
+│  └────────────────────────────────────────┘ │
+│  ┌────────────────────────────────────────┐ │
+│  │ 📄 Document: admission_guide.pdf       │ │
+│  │    Score: 0.85                         │ │
+│  │    Preview: "Quy trình xét tuyển..."   │ │
+│  └────────────────────────────────────────┘ │
+│                                              │
+└─────────────────────────────────────────────┘
+```
+
+#### 2.3.2. Thiết kế lớp chi tiết
+
+```mermaid
+classDiagram
+    class Chroma {
+        -ChromaClient client
+        -Embedder embedding
+        -str persist_directory
+        -Collection collection
+        +__init__(persist_directory, embedding)
+        +add_texts(texts, metadatas, ids)
+        +similarity_search(query, k, filter)
+        +similarity_search_with_threshold(query, k, threshold)
+        +similarity_search_with_relevance_scores(query, k)
+        -__query_collection(query_texts, query_embeddings, n_results)
+        -__select_relevance_score_fn()
+    }
+
+    class Embedder {
+        -SentenceTransformer model
+        -str model_name
+        -int embedding_dim
+        +__init__(model_name)
+        +embed_documents(texts)
+        +embed_query(query)
+        +get_embedding_dimension()
+    }
+
+    class Document {
+        +str page_content
+        +dict metadata
+        +str document_id
+        +datetime created_at
+        +to_dict()
+    }
+
+    class DistanceMetric {
+        <<enumeration>>
+        L2
+        COSINE
+        IP
+    }
+
+    class RelevanceScoreCalculator {
+        +get_relevance_score_fn(distance_metric)
+        +euclidean_relevance_score_fn(distance)
+        +cosine_relevance_score_fn(distance)
+        +max_inner_product_relevance_score_fn(distance)
+    }
+
+    Chroma --> Embedder : uses
+    Chroma --> Document : returns
+    Chroma --> DistanceMetric : uses
+    Chroma --> RelevanceScoreCalculator : uses
+```
+
+**Giải thích thiết kế:**
+- **Chroma**: Lớp chính quản lý vector database, cung cấp các phương thức tìm kiếm
+- **Embedder**: Chịu trách nhiệm chuyển đổi text thành vector embeddings
+- **Document**: Entity đại diện cho một chunk văn bản
+- **DistanceMetric**: Enum định nghĩa các loại distance metrics
+- **RelevanceScoreCalculator**: Tính toán độ liên quan dựa trên distance
+
+#### 2.3.3. Biểu đồ hoạt động
+
+```mermaid
+activity
+  start
+  :User enters search query;
+  :System receives query;
+
+  if (Query is empty?) then (yes)
+    :Show error message;
+    stop
+  else (no)
+    :Refine query using LLM;
+  endif
+
+  :Convert query to embedding vector;
+  :Search in vector database;
+
+  fork
+    :Calculate L2 distance;
+  fork again
+    :Apply metadata filters;
+  fork again
+    :Sort by relevance score;
+  end fork
+
+  :Retrieve top K results;
+
+  if (Results above threshold?) then (yes)
+    :Format and return results;
+  else (no)
+    :Return empty result with message;
+  endif
+
+  :Display results to user;
+  stop
+```
+
+#### 2.3.4. Biểu đồ tuần tự
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI
+    participant SearchController
+    participant QueryRefiner
+    participant Embedder
+    participant VectorDB as Chroma
+    participant ResponseFormatter
+
+    User->>UI: Enter search query
+    UI->>SearchController: search_request(query, k, threshold)
+
+    SearchController->>QueryRefiner: refine_query(query)
+    QueryRefiner-->>SearchController: refined_query
+
+    SearchController->>Embedder: embed_query(refined_query)
+    Embedder-->>SearchController: query_embedding
+
+    SearchController->>VectorDB: similarity_search_with_threshold(embedding, k, threshold)
+
+    VectorDB->>VectorDB: __query_collection()
+    VectorDB->>VectorDB: calculate_distances()
+    VectorDB->>VectorDB: apply_threshold_filter()
+    VectorDB->>VectorDB: sort_by_relevance()
+
+    VectorDB-->>SearchController: List<Document, score>
+
+    SearchController->>ResponseFormatter: format_results(documents)
+    ResponseFormatter-->>SearchController: formatted_response
+
+    SearchController-->>UI: search_results
+    UI-->>User: Display results
+```
+
+### 2.4. Chức năng 2: Document Processing và Indexing
+
+#### 2.4.1. Thiết kế giao diện
+
+```
+┌─────────────────────────────────────────────┐
+│         DOCUMENT PROCESSING INTERFACE        │
+├─────────────────────────────────────────────┤
+│                                              │
+│  Upload Documents:                          │
+│  ┌────────────────────────────────────────┐ │
+│  │ 📁 Drop files here or click to browse  │ │
+│  │                                         │ │
+│  │  Supported: PDF, MD, TXT, DOCX         │ │
+│  └────────────────────────────────────────┘ │
+│                                              │
+│  Processing Options:                        │
+│  ├─ Chunk Size: [1000 ▼]                   │
+│  ├─ Chunk Overlap: [200 ▼]                 │
+│  └─ Split Method: [Recursive ▼]            │
+│                                              │
+│  Documents Queue:                           │
+│  ┌────────────────────────────────────────┐ │
+│  │ ✅ student_handbook.pdf (342 chunks)   │ │
+│  │ ⏳ admission_guide.pdf (Processing...) │ │
+│  │ ⏸️ curriculum.docx (Queued)           │ │
+│  └────────────────────────────────────────┘ │
+│                                              │
+│  [Process All] [Pause] [Clear Queue]        │
+│                                              │
+└─────────────────────────────────────────────┘
+```
+
+#### 2.4.2. Thiết kế lớp chi tiết
+
+```mermaid
+classDiagram
+    class DocumentLoader {
+        -str docs_path
+        -List~str~ supported_formats
+        +load_documents(file_paths)
+        +load_pdf(file_path)
+        +load_markdown(file_path)
+        +load_text(file_path)
+        +extract_metadata(file_path)
+    }
+
+    class TextSplitter {
+        -int chunk_size
+        -int chunk_overlap
+        -str split_method
+        +split_documents(documents)
+        +recursive_split(text, separators)
+        +merge_splits(splits, separator)
+        +calculate_chunk_metadata(chunk, document)
+    }
+
+    class DocumentProcessor {
+        -DocumentLoader loader
+        -TextSplitter splitter
+        -Embedder embedder
+        -Chroma vector_store
+        +process_documents(file_paths)
+        +process_single_document(file_path)
+        +create_chunks(document)
+        +generate_embeddings(chunks)
+        +store_in_vectordb(chunks_with_embeddings)
+    }
+
+    class ProcessingQueue {
+        -Queue~Document~ queue
+        -bool is_processing
+        -int batch_size
+        +add_to_queue(documents)
+        +process_queue()
+        +pause_processing()
+        +clear_queue()
+        +get_queue_status()
+    }
+
+    DocumentProcessor --> DocumentLoader : uses
+    DocumentProcessor --> TextSplitter : uses
+    DocumentProcessor --> Embedder : uses
+    DocumentProcessor --> Chroma : stores in
+    ProcessingQueue --> DocumentProcessor : manages
+```
+
+**Giải thích thiết kế:**
+- **DocumentLoader**: Đọc và chuyển đổi các định dạng tài liệu khác nhau
+- **TextSplitter**: Chia tài liệu thành các chunks với kích thước phù hợp
+- **DocumentProcessor**: Điều phối toàn bộ quá trình xử lý tài liệu
+- **ProcessingQueue**: Quản lý hàng đợi xử lý tài liệu
+
+#### 2.4.3. Biểu đồ hoạt động
+
+```mermaid
+activity
+  start
+  :Admin uploads documents;
+
+  if (Valid file format?) then (no)
+    :Show error message;
+    stop
+  else (yes)
+    :Add to processing queue;
+  endif
+
+  while (Documents in queue?) is (yes)
+    :Get next document;
+    :Load document content;
+
+    switch (Document type?)
+    case (PDF)
+      :Extract PDF text;
+    case (Markdown)
+      :Parse markdown;
+    case (Text)
+      :Read plain text;
+    endswitch
+
+    :Split into chunks;
+    :Generate embeddings for chunks;
+    :Store in vector database;
+    :Update processing status;
+  endwhile (no)
+
+  :Show completion message;
+  stop
+```
+
+#### 2.4.4. Biểu đồ tuần tự
+
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant UI
+    participant ProcessingController
+    participant DocumentLoader
+    participant TextSplitter
+    participant Embedder
+    participant VectorStore as Chroma
+    participant Queue
+
+    Admin->>UI: Upload documents
+    UI->>ProcessingController: process_documents(files)
+
+    ProcessingController->>Queue: add_to_queue(files)
+    Queue-->>ProcessingController: queue_id
+
+    loop For each document in queue
+        ProcessingController->>Queue: get_next_document()
+        Queue-->>ProcessingController: document
+
+        ProcessingController->>DocumentLoader: load_document(document)
+        DocumentLoader-->>ProcessingController: document_content
+
+        ProcessingController->>TextSplitter: split_document(content, chunk_size)
+        TextSplitter-->>ProcessingController: chunks[]
+
+        ProcessingController->>Embedder: embed_documents(chunks)
+        Embedder-->>ProcessingController: embeddings[]
+
+        ProcessingController->>VectorStore: add_texts(chunks, embeddings, metadata)
+        VectorStore-->>ProcessingController: stored_ids[]
+
+        ProcessingController->>UI: update_progress(document_id, status)
+    end
+
+    ProcessingController-->>UI: processing_complete
+    UI-->>Admin: Display completion status
+```
+
+---
+
+## PHẦN 3: THIẾT KẾ CHI TIẾT - BẠN THỨ HAI
+
+**Họ tên:** Trần Thị B
+**Mã SV:** B21DCCN002
+**Phụ trách:** Module Chat Interface và Conversation Management
+
+### 3.1. Thiết kế CSDL liên quan module
+
+#### 3.1.1. Schema Conversation Management
+
+```sql
+CREATE TABLE conversations (
+    conversation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL,
+    user_id VARCHAR(255),
+    title VARCHAR(500),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_active BOOLEAN DEFAULT true
+);
+
+CREATE TABLE conversation_turns (
+    turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID REFERENCES conversations(conversation_id),
+    user_message TEXT NOT NULL,
+    assistant_response TEXT NOT NULL,
+    context_used TEXT[],
+    response_time_ms INTEGER,
+    tokens_used INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE conversation_feedback (
+    feedback_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    turn_id UUID REFERENCES conversation_turns(turn_id),
+    rating INTEGER CHECK (rating >= 1 AND rating <= 5),
+    feedback_text TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-#### Bảng Permissions
+### 3.2. Thiết kế lớp thực thể
+
+```python
+@dataclass
+class Conversation:
+    """Entity representing a conversation session"""
+    conversation_id: str
+    session_id: str
+    user_id: Optional[str]
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    is_active: bool = True
+    turns: List['ConversationTurn'] = field(default_factory=list)
+
+@dataclass
+class ConversationTurn:
+    """Entity representing a single turn in conversation"""
+    turn_id: str
+    conversation_id: str
+    user_message: str
+    assistant_response: str
+    context_used: List[str]
+    response_time_ms: int
+    tokens_used: int
+    created_at: datetime
+```
+
+### 3.3. Chức năng 1: Real-time Chat với WebSocket
+
+#### 3.3.1. Thiết kế giao diện
+
+```
+┌─────────────────────────────────────────────┐
+│           PTIT CHATBOT ASSISTANT            │
+├─────────────────────────────────────────────┤
+│ 💬 Conversations     │   Chat Window        │
+│ ┌──────────────┐    │  ┌─────────────────┐ │
+│ │ ▶ Tuyển sinh │    │  │ 🤖 Assistant:   │ │
+│ │   Học phí    │    │  │ Xin chào! Tôi   │ │
+│ │   Chương trình│   │  │ có thể giúp gì  │ │
+│ └──────────────┘    │  │ cho bạn?        │ │
+│                      │  └─────────────────┘ │
+│ [+ New Chat]        │  ┌─────────────────┐ │
+│                      │  │ 👤 You:         │ │
+│                      │  │ Điều kiện xét   │ │
+│                      │  │ tuyển là gì?    │ │
+│                      │  └─────────────────┘ │
+│                      │  ┌─────────────────┐ │
+│                      │  │ 🤖 Đang trả lời.│ │
+│                      │  │ ▌               │ │
+│                      │  └─────────────────┘ │
+│                      │                      │
+│                      │ ┌──────────────────┐ │
+│                      │ │Type message...   │ │
+│                      │ │                  │ │
+│                      │ └──────────────────┘ │
+│                      │ [📎] [🎤] [Send]    │
+└─────────────────────────────────────────────┘
+```
+
+#### 3.3.2. Thiết kế lớp chi tiết
+
+```mermaid
+classDiagram
+    class ConversationHandler {
+        -LamaCppClient llm
+        -ChatHistory chat_history
+        -ContextStrategy context_strategy
+        +handle_user_message(message, session_id)
+        +refine_question(question, history)
+        +generate_response(question, context)
+        +stream_response(response_generator)
+        +save_conversation_turn(turn)
+    }
+
+    class ChatHistory {
+        -int total_length
+        -List~Message~ messages
+        +append(message)
+        +clear()
+        +get_recent_messages(n)
+        +to_prompt_format()
+        +get_context_window()
+    }
+
+    class WebSocketManager {
+        -Dict active_connections
+        +connect(websocket, session_id)
+        +disconnect(session_id)
+        +send_message(session_id, message)
+        +broadcast(message)
+        +handle_incoming_message(session_id, message)
+    }
+
+    class StreamingResponse {
+        -Generator token_generator
+        -str buffer
+        -bool is_complete
+        +get_next_token()
+        +flush_buffer()
+        +mark_complete()
+    }
+
+    class SessionManager {
+        -Dict sessions
+        +create_session(user_id)
+        +get_session(session_id)
+        +update_session(session_id, data)
+        +cleanup_inactive_sessions()
+    }
+
+    ConversationHandler --> ChatHistory : uses
+    ConversationHandler --> StreamingResponse : generates
+    WebSocketManager --> ConversationHandler : calls
+    WebSocketManager --> SessionManager : manages
+```
+
+**Giải thích thiết kế:**
+- **ConversationHandler**: Xử lý logic chính của cuộc hội thoại
+- **ChatHistory**: Quản lý lịch sử chat và context window
+- **WebSocketManager**: Quản lý kết nối WebSocket real-time
+- **StreamingResponse**: Xử lý streaming response từ LLM
+- **SessionManager**: Quản lý các phiên làm việc của người dùng
+
+#### 3.3.3. Biểu đồ hoạt động
+
+```mermaid
+activity
+  start
+  :User connects to chat;
+  :Create/restore session;
+  :Initialize WebSocket connection;
+
+  while (Session active?) is (yes)
+    :Wait for user message;
+
+    if (Message received?) then (yes)
+      :Add to chat history;
+      :Refine question with context;
+      :Retrieve relevant documents;
+
+      fork
+        :Generate response stream;
+      fork again
+        :Send tokens to client;
+      fork again
+        :Update UI progressively;
+      end fork
+
+      :Save conversation turn;
+      :Update chat history;
+    else (no)
+      :Check connection status;
+    endif
+
+    if (User disconnects?) then (yes)
+      :Save session state;
+      :Close WebSocket;
+      stop
+    endif
+  endwhile (no)
+
+  stop
+```
+
+#### 3.3.4. Biểu đồ tuần tự
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant WebUI
+    participant WebSocket
+    participant ConversationHandler
+    participant ChatHistory
+    participant VectorDB
+    participant LLM
+    participant StreamManager
+
+    User->>WebUI: Open chat interface
+    WebUI->>WebSocket: establish_connection()
+    WebSocket->>ConversationHandler: create_session()
+    ConversationHandler->>ChatHistory: initialize()
+    ConversationHandler-->>WebSocket: session_id
+    WebSocket-->>WebUI: connection_established
+
+    User->>WebUI: Type message
+    WebUI->>WebSocket: send_message(text)
+    WebSocket->>ConversationHandler: handle_message(text, session_id)
+
+    ConversationHandler->>ChatHistory: add_user_message(text)
+    ConversationHandler->>ConversationHandler: refine_question(text, history)
+
+    ConversationHandler->>VectorDB: similarity_search(refined_question)
+    VectorDB-->>ConversationHandler: relevant_documents[]
+
+    ConversationHandler->>LLM: generate_response(question, context)
+    LLM->>StreamManager: create_token_stream()
+
+    loop Streaming tokens
+        StreamManager->>LLM: get_next_token()
+        LLM-->>StreamManager: token
+        StreamManager->>WebSocket: send_token(token)
+        WebSocket->>WebUI: update_response(token)
+        WebUI->>User: Display streaming text
+    end
+
+    ConversationHandler->>ChatHistory: add_assistant_message(response)
+    ConversationHandler-->>WebSocket: response_complete
+    WebSocket-->>WebUI: finalize_response
+```
+
+### 3.4. Chức năng 2: Context-Aware Response Generation
+
+#### 3.4.1. Thiết kế giao diện
+
+```
+┌─────────────────────────────────────────────┐
+│       CONTEXT & RESPONSE GENERATION          │
+├─────────────────────────────────────────────┤
+│                                              │
+│  Current Context Window:                    │
+│  ┌────────────────────────────────────────┐ │
+│  │ 📊 Context Usage: 2048/4096 tokens     │ │
+│  │ ├─ System Prompt: 150 tokens          │ │
+│  │ ├─ Chat History: 500 tokens           │ │
+│  │ └─ Retrieved Docs: 1398 tokens        │ │
+│  └────────────────────────────────────────┘ │
+│                                              │
+│  Response Strategy: [Tree Summarization ▼]  │
+│                                              │
+│  Retrieved Context:                         │
+│  ┌────────────────────────────────────────┐ │
+│  │ 1. 📄 Quy chế tuyển sinh (Score: 0.95) │ │
+│  │    "Điểm xét tuyển = Điểm thi THPT..." │ │
+│  ├────────────────────────────────────────┤ │
+│  │ 2. 📄 Hướng dẫn nhập học (Score: 0.88) │ │
+│  │    "Thí sinh trúng tuyển cần nộp..."   │ │
+│  └────────────────────────────────────────┘ │
+│                                              │
+│  Response Generation:                       │
+│  ┌────────────────────────────────────────┐ │
+│  │ ⚡ Generating response...               │ │
+│  │ Progress: ████████░░ 80%               │ │
+│  └────────────────────────────────────────┘ │
+│                                              │
+└─────────────────────────────────────────────┘
+```
+
+#### 3.4.2. Thiết kế lớp chi tiết
+
+```mermaid
+classDiagram
+    class BaseSynthesisStrategy {
+        <<abstract>>
+        -LamaCppClient llm
+        +synthesize_response(question, contexts)*
+        +get_strategy_name()*
+    }
+
+    class CreateAndRefineStrategy {
+        +synthesize_response(question, contexts)
+        +create_initial_answer(question, context)
+        +refine_answer(answer, new_context)
+        +get_strategy_name()
+    }
+
+    class TreeSummarizationStrategy {
+        -int max_children
+        +synthesize_response(question, contexts)
+        +build_tree(contexts)
+        +summarize_node(node_contexts)
+        +merge_summaries(summaries)
+        +get_strategy_name()
+    }
+
+    class AsyncTreeSummarizationStrategy {
+        -ThreadPoolExecutor executor
+        +synthesize_response(question, contexts)
+        +async_summarize_chunks(chunks)
+        +wait_for_completion(futures)
+        +get_strategy_name()
+    }
+
+    class ContextWindowManager {
+        -int max_tokens
+        -int current_usage
+        +calculate_tokens(text)
+        +can_fit(text)
+        +optimize_context(contexts)
+        +get_remaining_tokens()
+    }
+
+    class PromptTemplate {
+        -str system_prompt
+        -str user_prompt_template
+        +format_prompt(question, context)
+        +get_refine_prompt(answer, context)
+        +get_summarize_prompt(contexts)
+    }
+
+    BaseSynthesisStrategy <|-- CreateAndRefineStrategy
+    BaseSynthesisStrategy <|-- TreeSummarizationStrategy
+    BaseSynthesisStrategy <|-- AsyncTreeSummarizationStrategy
+
+    BaseSynthesisStrategy --> ContextWindowManager : uses
+    BaseSynthesisStrategy --> PromptTemplate : uses
+```
+
+**Giải thích thiết kế:**
+- **BaseSynthesisStrategy**: Abstract class định nghĩa interface cho các strategy
+- **CreateAndRefineStrategy**: Tạo câu trả lời ban đầu và tinh chỉnh dần
+- **TreeSummarizationStrategy**: Tổng hợp theo cấu trúc cây
+- **AsyncTreeSummarizationStrategy**: Tổng hợp song song để tăng tốc độ
+- **ContextWindowManager**: Quản lý và tối ưu context window
+- **PromptTemplate**: Quản lý các template prompt
+
+#### 3.4.3. Biểu đồ hoạt động
+
+```mermaid
+activity
+  start
+  :Receive question and contexts;
+
+  :Calculate total tokens;
+  if (Exceeds context window?) then (yes)
+    :Select synthesis strategy;
+
+    switch (Strategy type?)
+    case (Create & Refine)
+      :Create initial answer;
+      while (More contexts?) is (yes)
+        :Refine with next context;
+      endwhile (no)
+    case (Tree Summarization)
+      :Build context tree;
+      :Summarize leaf nodes;
+      :Merge summaries hierarchically;
+    case (Async Tree)
+      fork
+        :Summarize chunk 1;
+      fork again
+        :Summarize chunk 2;
+      fork again
+        :Summarize chunk N;
+      end fork
+      :Merge all summaries;
+    endswitch
+  else (no)
+    :Generate direct response;
+  endif
+
+  :Format final answer;
+  :Return response;
+  stop
+```
+
+#### 3.4.4. Biểu đồ tuần tự
+
+```mermaid
+sequenceDiagram
+    participant Handler as ConversationHandler
+    participant Strategy as SynthesisStrategy
+    participant ContextMgr as ContextWindowManager
+    participant Template as PromptTemplate
+    participant LLM
+    participant AsyncExecutor
+
+    Handler->>Strategy: synthesize_response(question, contexts)
+    Strategy->>ContextMgr: calculate_tokens(contexts)
+    ContextMgr-->>Strategy: total_tokens
+
+    alt Total tokens > max_window
+        Strategy->>ContextMgr: optimize_context(contexts)
+        ContextMgr-->>Strategy: optimized_contexts[]
+
+        alt Async Tree Strategy
+            Strategy->>AsyncExecutor: create_thread_pool()
+
+            par Parallel Processing
+                AsyncExecutor->>LLM: summarize(context_1)
+                and
+                AsyncExecutor->>LLM: summarize(context_2)
+                and
+                AsyncExecutor->>LLM: summarize(context_n)
+            end
+
+            AsyncExecutor-->>Strategy: summaries[]
+            Strategy->>Template: get_merge_prompt(summaries)
+            Template-->>Strategy: merge_prompt
+            Strategy->>LLM: generate_final_answer(merge_prompt)
+
+        else Create & Refine Strategy
+            Strategy->>Template: format_prompt(question, first_context)
+            Template-->>Strategy: initial_prompt
+            Strategy->>LLM: generate(initial_prompt)
+            LLM-->>Strategy: initial_answer
+
+            loop For remaining contexts
+                Strategy->>Template: get_refine_prompt(answer, next_context)
+                Template-->>Strategy: refine_prompt
+                Strategy->>LLM: generate(refine_prompt)
+                LLM-->>Strategy: refined_answer
+            end
+        end
+    else Total tokens <= max_window
+        Strategy->>Template: format_prompt(question, all_contexts)
+        Template-->>Strategy: prompt
+        Strategy->>LLM: generate(prompt)
+    end
+
+    LLM-->>Strategy: final_response
+    Strategy-->>Handler: response
+```
+
+---
+
+## PHẦN 4: THIẾT KẾ CHI TIẾT - BẠN THỨ BA
+
+**Họ tên:** Lê Văn C
+**Mã SV:** B21DCCN003
+**Phụ trách:** Module LLM Management và Admin Interface
+
+### 4.1. Thiết kế CSDL liên quan module
+
+#### 4.1.1. Schema Model Management
+
 ```sql
-CREATE TABLE permissions (
-    permission_id INT PRIMARY KEY AUTO_INCREMENT,
-    permission_name VARCHAR(100) UNIQUE NOT NULL,
-    resource VARCHAR(50),
-    action VARCHAR(50),
+CREATE TABLE llm_models (
+    model_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    model_name VARCHAR(255) NOT NULL UNIQUE,
+    model_type VARCHAR(100), -- 'llama', 'qwen', 'openchat', etc.
+    model_size VARCHAR(50), -- '7B', '13B', '70B'
+    file_path TEXT NOT NULL,
+    quantization VARCHAR(50), -- 'Q4_K_M', 'Q5_K_M', etc.
+    context_window INTEGER,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE model_settings (
+    setting_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    model_id UUID REFERENCES llm_models(model_id),
+    parameter_name VARCHAR(255),
+    parameter_value TEXT,
+    parameter_type VARCHAR(50) -- 'float', 'int', 'string', 'boolean'
+);
+
+CREATE TABLE admin_users (
+    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username VARCHAR(255) UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role VARCHAR(50), -- 'super_admin', 'content_admin', 'viewer'
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_login TIMESTAMP
+);
+
+CREATE TABLE admin_logs (
+    log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES admin_users(user_id),
+    action VARCHAR(255),
+    target_type VARCHAR(100), -- 'model', 'document', 'setting'
+    target_id VARCHAR(255),
+    details JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-#### Bảng Role_Permissions
-```sql
-CREATE TABLE role_permissions (
-    role_id INT,
-    permission_id INT,
-    PRIMARY KEY (role_id, permission_id),
-    FOREIGN KEY (role_id) REFERENCES roles(role_id),
-    FOREIGN KEY (permission_id) REFERENCES permissions(permission_id)
-);
+### 4.2. Thiết kế lớp thực thể
+
+```python
+@dataclass
+class LLMModel:
+    """Entity representing an LLM model"""
+    model_id: str
+    model_name: str
+    model_type: str
+    model_size: str
+    file_path: str
+    quantization: str
+    context_window: int
+    is_active: bool
+    settings: Dict[str, Any]
+    created_at: datetime
+
+@dataclass
+class AdminUser:
+    """Entity representing an admin user"""
+    user_id: str
+    username: str
+    role: str
+    permissions: List[str]
+    created_at: datetime
+    last_login: Optional[datetime]
 ```
 
-### 2.1.2 Thiết kế lớp thực thể
+### 4.3. Chức năng 1: LLM Model Management
 
-```java
-// Entity: User
-public class User {
-    private int userId;
-    private String username;
-    private String email;
-    private String passwordHash;
-    private String fullName;
-    private String phone;
-    private String address;
-    private Role role;
-    private UserStatus status;
-    private Date createdAt;
-    private Date updatedAt;
-
-    // Constructors, getters, setters
-}
-
-// Entity: Role
-public class Role {
-    private int roleId;
-    private String roleName;
-    private String description;
-    private List<Permission> permissions;
-    private Date createdAt;
-
-    // Constructors, getters, setters
-}
-
-// Entity: Permission
-public class Permission {
-    private int permissionId;
-    private String permissionName;
-    private String resource;
-    private String action;
-    private Date createdAt;
-
-    // Constructors, getters, setters
-}
-
-// Enum: UserStatus
-public enum UserStatus {
-    ACTIVE, INACTIVE, BANNED
-}
-```
-
-### 2.1.3 Chức năng 1: ĐĂNG KÝ NGƯỜI DÙNG
-
-#### Thiết kế giao diện
-
-**Client Side - Form đăng ký:**
-```
-┌──────────────────────────────────────┐
-│          ĐĂNG KÝ TÀI KHOẢN          │
-├──────────────────────────────────────┤
-│                                      │
-│  Tên đăng nhập: [_______________]    │
-│                                      │
-│  Email:         [_______________]    │
-│                                      │
-│  Mật khẩu:      [_______________]    │
-│                                      │
-│  Xác nhận MK:   [_______________]    │
-│                                      │
-│  Họ tên:        [_______________]    │
-│                                      │
-│  Số điện thoại: [_______________]    │
-│                                      │
-│  [✓] Đồng ý điều khoản sử dụng      │
-│                                      │
-│     [Đăng ký]    [Hủy]              │
-│                                      │
-└──────────────────────────────────────┘
-```
-
-**Server Side - Admin Panel:**
-```
-┌────────────────────────────────────────────┐
-│         QUẢN LÝ ĐĂNG KÝ MỚI              │
-├────────────────────────────────────────────┤
-│ Danh sách tài khoản chờ duyệt:           │
-│                                            │
-│ ┌──┬──────────┬─────────┬──────────────┐ │
-│ │ID│ Username │  Email  │   Hành động  │ │
-│ ├──┼──────────┼─────────┼──────────────┤ │
-│ │1 │ user01   │ a@b.com │ [Duyệt][Từ chối]│ │
-│ │2 │ user02   │ c@d.com │ [Duyệt][Từ chối]│ │
-│ └──┴──────────┴─────────┴──────────────┘ │
-└────────────────────────────────────────────┘
-```
-
-#### Biểu đồ lớp chi tiết
+#### 4.3.1. Thiết kế giao diện
 
 ```
-┌─────────────────────────┐
-│   RegisterController    │
-├─────────────────────────┤
-│ - userService: IUserSvc │
-│ - validator: Validator  │
-├─────────────────────────┤
-│ + register(): Response  │
-│ + validateInput(): bool │
-└─────────────────────────┘
-            │
-            │ uses
-            ▼
-┌─────────────────────────┐
-│   UserService           │
-├─────────────────────────┤
-│ - userRepo: IUserRepo   │
-│ - emailService: IEmail  │
-│ - encoder: IEncoder     │
-├─────────────────────────┤
-│ + createUser(): User    │
-│ + checkExists(): bool   │
-│ + hashPassword(): string│
-│ + sendWelcomeEmail()    │
-└─────────────────────────┘
-            │
-            │ uses
-            ▼
-┌─────────────────────────┐
-│   UserRepository        │
-├─────────────────────────┤
-│ - db: DatabaseConnection│
-├─────────────────────────┤
-│ + save(user: User): bool│
-│ + findByEmail(): User   │
-│ + findByUsername(): User│
-└─────────────────────────┘
+┌─────────────────────────────────────────────┐
+│          LLM MODEL MANAGEMENT                │
+├─────────────────────────────────────────────┤
+│                                              │
+│  Active Models:                             │
+│  ┌────────────────────────────────────────┐ │
+│  │ 🤖 Llama 3.1 - 8B                      │ │
+│  │    Status: ✅ Active                   │ │
+│  │    Context: 128k tokens                │ │
+│  │    Quantization: Q4_K_M                │ │
+│  │    [Configure] [Test] [Deactivate]     │ │
+│  ├────────────────────────────────────────┤ │
+│  │ 🤖 Qwen 2.5 - 3B                       │ │
+│  │    Status: ✅ Active                   │ │
+│  │    Context: 32k tokens                 │ │
+│  │    Quantization: Q5_K_M                │ │
+│  │    [Configure] [Test] [Deactivate]     │ │
+│  └────────────────────────────────────────┘ │
+│                                              │
+│  Model Configuration:                       │
+│  ┌────────────────────────────────────────┐ │
+│  │ Temperature: [0.7 ━━━━●━━━━] 1.0       │ │
+│  │ Max Tokens: [2048 ▼]                   │ │
+│  │ Top P: [0.95 ━━━━━━━━●━] 1.0          │ │
+│  │ Top K: [40 ▼]                          │ │
+│  │ Repeat Penalty: [1.1 ━━●━━━━━] 2.0    │ │
+│  │                                         │ │
+│  │ [Save Settings] [Reset to Default]     │ │
+│  └────────────────────────────────────────┘ │
+│                                              │
+│  [+ Add New Model] [Download Models]        │
+│                                              │
+└─────────────────────────────────────────────┘
 ```
 
-**Lý do thiết kế:**
-- **Controller**: Tách biệt logic xử lý request/response với business logic
-- **Service**: Chứa business logic, đảm bảo Single Responsibility Principle
-- **Repository**: Tách biệt data access layer, dễ thay đổi database sau này
-- **Interface**: Sử dụng interface để đảm bảo Dependency Inversion Principle
+#### 4.3.2. Thiết kế lớp chi tiết
 
-#### Biểu đồ hoạt động
+```mermaid
+classDiagram
+    class LamaCppClient {
+        -Llama model
+        -BaseModelSettings model_settings
+        -Path model_path
+        +load_model(model_settings)
+        +generate(prompt, max_tokens, temperature)
+        +stream_generate(prompt, callback)
+        +parse_token(token)
+        +get_model_info()
+        +unload_model()
+    }
 
-```
-┌─────────┐
-│  Start  │
-└────┬────┘
-     │
-     ▼
-┌──────────────────┐
-│ Nhập thông tin   │
-│    đăng ký       │
-└────────┬─────────┘
-         │
-         ▼
-    ◇─────────◇
-   ╱           ╲
-  ╱   Validate  ╲     Không hợp lệ
- ◇   thông tin   ◇─────────────┐
-  ╲             ╱              │
-   ╲           ╱               │
-    ◇─────────◇                │
-         │ Hợp lệ              │
-         ▼                     │
-    ◇─────────◇                │
-   ╱           ╲               │
-  ╱  Username   ╲   Tồn tại   │
- ◇   tồn tại?    ◇────────────┤
-  ╲             ╱              │
-   ╲           ╱               │
-    ◇─────────◇                │
-         │ Không               │
-         ▼                     │
-    ◇─────────◇                │
-   ╱           ╲               │
-  ╱    Email    ╲   Tồn tại   │
- ◇   tồn tại?    ◇────────────┤
-  ╲             ╱              │
-   ╲           ╱               │
-    ◇─────────◇                │
-         │ Không               │
-         ▼                     │
-┌──────────────────┐           │
-│  Mã hóa mật khẩu │           │
-└────────┬─────────┘           │
-         │                     │
-         ▼                     │
-┌──────────────────┐           │
-│  Lưu vào CSDL    │           │
-└────────┬─────────┘           │
-         │                     │
-         ▼                     │
-┌──────────────────┐           │
-│ Gửi email xác   │            │
-│     nhận         │           │
-└────────┬─────────┘           │
-         │                     │
-         ▼                     ▼
-┌──────────────────┐    ┌──────────────┐
-│ Thông báo thành  │    │ Hiển thị lỗi │
-│      công        │    └──────────────┘
-└────────┬─────────┘
-         │
-         ▼
-    ┌─────────┐
-    │   End   │
-    └─────────┘
+    class ModelRegistry {
+        -Dict~str,BaseModelSettings~ models
+        +register_model(name, settings)
+        +get_model_settings(name)
+        +get_models()
+        +get_model_info(name)
+        +update_model_settings(name, params)
+    }
+
+    class BaseModelSettings {
+        <<abstract>>
+        +str model_name
+        +str model_file
+        +int context_window
+        +float temperature
+        +int max_tokens
+        +get_model_params()*
+        +validate_settings()*
+    }
+
+    class LlamaSettings {
+        +get_model_params()
+        +validate_settings()
+        +get_chat_template()
+    }
+
+    class QwenSettings {
+        +get_model_params()
+        +validate_settings()
+        +get_chat_template()
+    }
+
+    class ModelDownloader {
+        -str download_path
+        +download_model(model_url, model_name)
+        +verify_checksum(file_path, expected_hash)
+        +get_available_models()
+        +get_download_progress()
+    }
+
+    class ModelTester {
+        -LamaCppClient client
+        +test_generation(prompt)
+        +benchmark_speed()
+        +validate_output_format()
+        +check_memory_usage()
+    }
+
+    LamaCppClient --> BaseModelSettings : uses
+    ModelRegistry --> BaseModelSettings : manages
+    BaseModelSettings <|-- LlamaSettings
+    BaseModelSettings <|-- QwenSettings
+    ModelTester --> LamaCppClient : tests
 ```
 
-#### Biểu đồ tuần tự
+**Giải thích thiết kế:**
+- **LamaCppClient**: Client chính để tương tác với LLM
+- **ModelRegistry**: Quản lý registry của các model
+- **BaseModelSettings**: Abstract class cho settings của model
+- **ModelDownloader**: Xử lý download và verify model files
+- **ModelTester**: Test và benchmark các model
 
-```
-Client          Controller      UserService      UserRepo        EmailService     Database
-  │                 │                │               │                │               │
-  │──Register────▶│                │               │                │               │
-  │  Request       │                │               │                │               │
-  │                 │                │               │                │               │
-  │                 │──validate()──▶│               │                │               │
-  │                 │                │               │                │               │
-  │                 │                │──checkExists─▶│               │               │
-  │                 │                │  (username)   │               │               │
-  │                 │                │               │                │               │
-  │                 │                │               │──SELECT────────────────────▶│
-  │                 │                │               │   FROM users                 │
-  │                 │                │               │◀───────────null──────────────│
-  │                 │                │               │                │               │
-  │                 │                │◀──not exists──│               │               │
-  │                 │                │               │                │               │
-  │                 │                │──checkExists─▶│               │               │
-  │                 │                │   (email)     │               │               │
-  │                 │                │               │                │               │
-  │                 │                │               │──SELECT────────────────────▶│
-  │                 │                │               │   FROM users                 │
-  │                 │                │               │◀───────────null──────────────│
-  │                 │                │               │                │               │
-  │                 │                │◀──not exists──│               │               │
-  │                 │                │               │                │               │
-  │                 │──hashPassword─▶│               │                │               │
-  │                 │◀──hashedPwd────│               │                │               │
-  │                 │                │               │                │               │
-  │                 │──createUser───▶│               │                │               │
-  │                 │                │──save(user)──▶│                │               │
-  │                 │                │               │──INSERT INTO──────────────▶│
-  │                 │                │               │     users                    │
-  │                 │                │               │◀──────user_id───────────────│
-  │                 │                │◀──success─────│                │               │
-  │                 │                │               │                │               │
-  │                 │                │──sendEmail───────────────────▶│               │
-  │                 │                │               │                │──send()────▶│
-  │                 │                │               │                │◀────OK──────│
-  │                 │                │◀──────────────email sent──────│               │
-  │                 │                │               │                │               │
-  │                 │◀──User created─│               │                │               │
-  │                 │                │               │                │               │
-  │◀──Response──────│               │               │                │               │
-  │   (success)     │                │               │                │               │
-```
+#### 4.3.3. Biểu đồ hoạt động
 
-### 2.1.4 Chức năng 2: ĐĂNG NHẬP
+```mermaid
+activity
+  start
+  :Admin accesses model management;
 
-#### Thiết kế giao diện
+  :Display available models;
 
-**Client Side - Form đăng nhập:**
-```
-┌──────────────────────────────────────┐
-│            ĐĂNG NHẬP                 │
-├──────────────────────────────────────┤
-│                                      │
-│  Email/Username: [_______________]   │
-│                                      │
-│  Mật khẩu:       [_______________]   │
-│                                      │
-│  [✓] Ghi nhớ đăng nhập              │
-│                                      │
-│     [Đăng nhập]    [Quên MK?]       │
-│                                      │
-│  ─────────── HOẶC ──────────         │
-│                                      │
-│  [Đăng nhập với Google]              │
-│  [Đăng nhập với Facebook]            │
-│                                      │
-└──────────────────────────────────────┘
+  switch (Admin action?)
+  case (Add new model)
+    :Select model from repository;
+    :Download model file;
+    :Verify checksum;
+    :Configure initial settings;
+    :Test model generation;
+    if (Test successful?) then (yes)
+      :Save model configuration;
+      :Activate model;
+    else (no)
+      :Show error;
+      :Rollback changes;
+    endif
+  case (Configure model)
+    :Load current settings;
+    :Display configuration form;
+    :Admin adjusts parameters;
+    :Validate parameters;
+    :Test with new settings;
+    :Save configuration;
+  case (Test model)
+    :Load model;
+    :Run benchmark tests;
+    :Check memory usage;
+    :Generate sample responses;
+    :Display test results;
+  endswitch
+
+  :Log admin action;
+  :Update model status;
+  stop
 ```
 
-**Server Side - Session Management:**
-```
-┌────────────────────────────────────────────┐
-│        QUẢN LÝ PHIÊN ĐĂNG NHẬP           │
-├────────────────────────────────────────────┤
-│ Sessions hiện tại:                        │
-│                                            │
-│ ┌──┬──────────┬─────────┬──────────────┐ │
-│ │ID│ Username │   IP    │   Thời gian  │ │
-│ ├──┼──────────┼─────────┼──────────────┤ │
-│ │1 │ admin    │127.0.0.1│ 10:30:25     │ │
-│ │2 │ user01   │192.168.1│ 11:45:12     │ │
-│ └──┴──────────┴─────────┴──────────────┘ │
-│                                            │
-│ [Terminate All Sessions] [Refresh]        │
-└────────────────────────────────────────────┘
+#### 4.3.4. Biểu đồ tuần tự
+
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant AdminUI
+    participant ModelController
+    participant ModelRegistry
+    participant LamaCppClient
+    participant ModelDownloader
+    participant Database
+
+    Admin->>AdminUI: Access model management
+    AdminUI->>ModelController: get_available_models()
+    ModelController->>ModelRegistry: list_models()
+    ModelRegistry-->>ModelController: models[]
+    ModelController-->>AdminUI: model_list
+    AdminUI-->>Admin: Display models
+
+    Admin->>AdminUI: Add new model (Llama 3.1)
+    AdminUI->>ModelController: add_model(model_info)
+
+    ModelController->>ModelDownloader: download_model(url)
+    ModelDownloader-->>ModelController: download_progress
+    ModelController-->>AdminUI: Update progress
+
+    ModelDownloader-->>ModelController: model_file_path
+    ModelController->>ModelDownloader: verify_checksum(file)
+    ModelDownloader-->>ModelController: checksum_valid
+
+    ModelController->>ModelRegistry: create_settings(model_type)
+    ModelRegistry-->>ModelController: model_settings
+
+    ModelController->>LamaCppClient: load_model(settings)
+    LamaCppClient-->>ModelController: model_loaded
+
+    ModelController->>LamaCppClient: test_generation("Test prompt")
+    LamaCppClient-->>ModelController: test_response
+
+    ModelController->>Database: save_model_config(model)
+    Database-->>ModelController: saved
+
+    ModelController-->>AdminUI: model_added_successfully
+    AdminUI-->>Admin: Show success message
 ```
 
-#### Biểu đồ lớp chi tiết
+### 4.4. Chức năng 2: Admin Dashboard và System Monitoring
+
+#### 4.4.1. Thiết kế giao diện
 
 ```
-┌─────────────────────────┐
-│    LoginController      │
-├─────────────────────────┤
-│ - authService: IAuthSvc │
-│ - tokenService: IToken  │
-├─────────────────────────┤
-│ + login(): Response     │
-│ + logout(): Response    │
-│ + refreshToken(): Token │
-└─────────────────────────┘
-            │
-            │ uses
-            ▼
-┌─────────────────────────┐
-│   AuthService           │
-├─────────────────────────┤
-│ - userRepo: IUserRepo   │
-│ - tokenGen: ITokenGen   │
-│ - encoder: IEncoder     │
-├─────────────────────────┤
-│ + authenticate(): User  │
-│ + verifyPassword(): bool│
-│ + generateTokens(): Map │
-│ + createSession(): void │
-└─────────────────────────┘
-            │
-            │ uses
-            ▼
-┌─────────────────────────┐
-│   SessionRepository     │
-├─────────────────────────┤
-│ - cache: RedisClient    │
-├─────────────────────────┤
-│ + createSession(): void │
-│ + getSession(): Session │
-│ + deleteSession(): void │
-└─────────────────────────┘
+┌─────────────────────────────────────────────┐
+│         ADMIN DASHBOARD - PTIT CHATBOT       │
+├─────────────────────────────────────────────┤
+│  📊 System Overview          🔄 Auto-refresh │
+│  ┌────────────────────────────────────────┐ │
+│  │ Active Users: 127    CPU Usage: 45%    │ │
+│  │ Total Chats: 3,421   RAM: 8.2/16 GB    │ │
+│  │ Avg Response: 2.3s   GPU: 65%          │ │
+│  └────────────────────────────────────────┘ │
+│                                              │
+│  📈 Real-time Metrics:                      │
+│  ┌────────────────────────────────────────┐ │
+│  │     Requests per Minute                 │ │
+│  │ 100 ┤     ╱╲                          │ │
+│  │  75 ┤    ╱  ╲    ╱╲                   │ │
+│  │  50 ┤   ╱    ╲__╱  ╲                  │ │
+│  │  25 ┤__╱            ╲                 │ │
+│  │   0 └────────────────────────          │ │
+│  │     00:00  06:00  12:00  18:00  24:00  │ │
+│  └────────────────────────────────────────┘ │
+│                                              │
+│  🗂️ Recent Activities:                      │
+│  ┌────────────────────────────────────────┐ │
+│  │ 10:23 - Admin added new document       │ │
+│  │ 10:15 - Model Llama 3.1 activated      │ │
+│  │ 09:45 - System backup completed        │ │
+│  │ 09:30 - User feedback: 5 stars        │ │
+│  └────────────────────────────────────────┘ │
+│                                              │
+│  Quick Actions:                             │
+│  [📁 Manage Docs] [🤖 Models] [👥 Users]   │
+│  [📊 Reports] [⚙️ Settings] [🔒 Logout]    │
+│                                              │
+└─────────────────────────────────────────────┘
 ```
 
-#### Biểu đồ hoạt động
+#### 4.4.2. Thiết kế lớp chi tiết
 
-```
-┌─────────┐
-│  Start  │
-└────┬────┘
-     │
-     ▼
-┌──────────────────┐
-│ Nhập username/   │
-│ email & password │
-└────────┬─────────┘
-         │
-         ▼
-    ◇─────────◇
-   ╱           ╲
-  ╱   Validate  ╲     Không hợp lệ
- ◇   thông tin   ◇─────────────┐
-  ╲             ╱              │
-   ╲           ╱               │
-    ◇─────────◇                │
-         │ Hợp lệ              │
-         ▼                     │
-┌──────────────────┐           │
-│ Tìm user trong   │           │
-│      CSDL        │           │
-└────────┬─────────┘           │
-         │                     │
-         ▼                     │
-    ◇─────────◇                │
-   ╱           ╲               │
-  ╱    User     ╲  Không có   │
- ◇   tồn tại?    ◇────────────┤
-  ╲             ╱              │
-   ╲           ╱               │
-    ◇─────────◇                │
-         │ Có                  │
-         ▼                     │
-┌──────────────────┐           │
-│ Verify password  │           │
-└────────┬─────────┘           │
-         │                     │
-         ▼                     │
-    ◇─────────◇                │
-   ╱           ╲               │
-  ╱  Password   ╲    Sai       │
- ◇   đúng?       ◇────────────┤
-  ╲             ╱              │
-   ╲           ╱               │
-    ◇─────────◇                │
-         │ Đúng                │
-         ▼                     │
-┌──────────────────┐           │
-│ Generate JWT     │           │
-│     tokens       │           │
-└────────┬─────────┘           │
-         │                     │
-         ▼                     │
-┌──────────────────┐           │
-│ Create session   │           │
-└────────┬─────────┘           │
-         │                     │
-         ▼                     ▼
-┌──────────────────┐    ┌──────────────┐
-│ Return tokens    │    │ Return error │
-│ & user info      │    │   message    │
-└────────┬─────────┘    └──────────────┘
-         │
-         ▼
-    ┌─────────┐
-    │   End   │
-    └─────────┘
+```mermaid
+classDiagram
+    class AdminDashboard {
+        -SystemMonitor monitor
+        -MetricsCollector metrics
+        -ActivityLogger logger
+        +get_system_overview()
+        +get_realtime_metrics()
+        +get_recent_activities()
+        +export_report(date_range)
+    }
+
+    class SystemMonitor {
+        -cpu_usage: float
+        -memory_usage: float
+        -gpu_usage: float
+        -active_connections: int
+        +get_system_stats()
+        +monitor_resources()
+        +check_health_status()
+        +alert_on_threshold()
+    }
+
+    class MetricsCollector {
+        -Database db
+        +collect_chat_metrics()
+        +collect_response_times()
+        +collect_user_metrics()
+        +aggregate_metrics(period)
+        +generate_chart_data()
+    }
+
+    class ActivityLogger {
+        -Queue activity_queue
+        +log_activity(user, action, details)
+        +get_recent_activities(limit)
+        +search_activities(filters)
+        +export_logs(format)
+    }
+
+    class ReportGenerator {
+        -template_engine: TemplateEngine
+        +generate_daily_report()
+        +generate_usage_report(date_range)
+        +generate_performance_report()
+        +export_to_pdf(report)
+        +schedule_reports()
+    }
+
+    class AdminAuthManager {
+        -session_manager: SessionManager
+        +authenticate(username, password)
+        +authorize(user, resource, action)
+        +create_session(user)
+        +validate_token(token)
+        +logout(session_id)
+    }
+
+    AdminDashboard --> SystemMonitor : uses
+    AdminDashboard --> MetricsCollector : uses
+    AdminDashboard --> ActivityLogger : uses
+    AdminDashboard --> ReportGenerator : uses
+    AdminDashboard --> AdminAuthManager : protected by
 ```
 
-#### Biểu đồ tuần tự
+**Giải thích thiết kế:**
+- **AdminDashboard**: Controller chính cho dashboard
+- **SystemMonitor**: Giám sát tài nguyên hệ thống
+- **MetricsCollector**: Thu thập và tổng hợp metrics
+- **ActivityLogger**: Ghi log hoạt động admin
+- **ReportGenerator**: Tạo báo cáo tự động
+- **AdminAuthManager**: Quản lý authentication và authorization
 
+#### 4.4.3. Biểu đồ hoạt động
+
+```mermaid
+activity
+  start
+  :Admin login;
+
+  if (Valid credentials?) then (no)
+    :Show error;
+    stop
+  else (yes)
+    :Create session;
+  endif
+
+  :Load dashboard;
+
+  fork
+    :Fetch system metrics;
+  fork again
+    :Load recent activities;
+  fork again
+    :Calculate statistics;
+  end fork
+
+  :Display dashboard;
+
+  while (Admin logged in?) is (yes)
+    :Auto-refresh metrics;
+
+    if (Admin action?) then (yes)
+      switch (Action type?)
+      case (View reports)
+        :Generate report;
+        :Display/Export;
+      case (Manage documents)
+        :Open document manager;
+        :Process documents;
+      case (Configure system)
+        :Load settings;
+        :Update configuration;
+        :Apply changes;
+      case (View logs)
+        :Query activity logs;
+        :Display filtered results;
+      endswitch
+    endif
+
+    :Update dashboard;
+    :Check for alerts;
+
+    if (Critical alert?) then (yes)
+      :Send notification;
+      :Log incident;
+    endif
+  endwhile (no)
+
+  :Logout;
+  :Clear session;
+  stop
 ```
-Client          Controller      AuthService      UserRepo        SessionRepo      Database
-  │                 │                │               │                │               │
-  │──Login────────▶│                │               │                │               │
-  │  Request       │                │               │                │               │
-  │                 │                │               │                │               │
-  │                 │──validate()──▶│               │                │               │
-  │                 │                │               │                │               │
-  │                 │                │──findUser────▶│               │               │
-  │                 │                │               │──SELECT────────────────────▶│
-  │                 │                │               │   FROM users                 │
-  │                 │                │               │◀────────user data───────────│
-  │                 │                │◀───user───────│               │               │
-  │                 │                │               │                │               │
-  │                 │──verifyPwd────▶│               │                │               │
-  │                 │◀───true────────│               │                │               │
-  │                 │                │               │                │               │
-  │                 │──generateJWT──▶│               │                │               │
-  │                 │◀──tokens──────│               │                │               │
-  │                 │                │               │                │               │
-  │                 │──createSession─▶──────────────▶──────────────▶│               │
-  │                 │                │               │                │──SAVE──────▶│
-  │                 │                │               │                │   (Redis)    │
-  │                 │                │               │                │◀────OK──────│
-  │                 │◀──sessionId───────────────────◀──────────────◀│               │
-  │                 │                │               │                │               │
-  │◀──Response──────│               │               │                │               │
-  │  (tokens)      │                │               │                │               │
+
+#### 4.4.4. Biểu đồ tuần tự
+
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant AuthManager
+    participant Dashboard
+    participant SystemMonitor
+    participant MetricsDB
+    participant ActivityLog
+    participant ReportGen
+
+    Admin->>AuthManager: login(credentials)
+    AuthManager->>AuthManager: validate_credentials()
+    AuthManager-->>Dashboard: session_token
+
+    Dashboard->>SystemMonitor: get_system_stats()
+    SystemMonitor->>SystemMonitor: check_cpu()
+    SystemMonitor->>SystemMonitor: check_memory()
+    SystemMonitor->>SystemMonitor: check_gpu()
+    SystemMonitor-->>Dashboard: system_stats
+
+    par Parallel Data Loading
+        Dashboard->>MetricsDB: get_chat_metrics(last_24h)
+        MetricsDB-->>Dashboard: chat_data
+    and
+        Dashboard->>ActivityLog: get_recent_activities(20)
+        ActivityLog-->>Dashboard: activities[]
+    end
+
+    Dashboard-->>Admin: Display dashboard
+
+    loop Every 30 seconds
+        Dashboard->>SystemMonitor: refresh_metrics()
+        SystemMonitor-->>Dashboard: updated_metrics
+        Dashboard->>Admin: Update display
+    end
+
+    Admin->>Dashboard: generate_report(weekly)
+    Dashboard->>ReportGen: create_weekly_report()
+
+    par Report Generation
+        ReportGen->>MetricsDB: query_metrics(week)
+        MetricsDB-->>ReportGen: weekly_metrics
+    and
+        ReportGen->>ActivityLog: query_logs(week)
+        ActivityLog-->>ReportGen: weekly_logs
+    end
+
+    ReportGen->>ReportGen: compile_report()
+    ReportGen->>ReportGen: generate_pdf()
+    ReportGen-->>Dashboard: report_file
+    Dashboard-->>Admin: Download report
 ```
 
 ---
 
-## 2.2 THIẾT KẾ CHI TIẾT - LÊ VĂN TRỌNG (MÃ SV: 20210002)
-### Module: Quản lý sản phẩm
+## PHẦN 5: TỔNG KẾT
 
-### 2.2.1 Thiết kế CSDL
+### 5.1. Phân công công việc
 
-#### Bảng Products
-```sql
-CREATE TABLE products (
-    product_id INT PRIMARY KEY AUTO_INCREMENT,
-    product_code VARCHAR(50) UNIQUE NOT NULL,
-    product_name VARCHAR(200) NOT NULL,
-    description TEXT,
-    price DECIMAL(10, 2) NOT NULL,
-    discount_price DECIMAL(10, 2),
-    quantity INT DEFAULT 0,
-    category_id INT,
-    brand_id INT,
-    status ENUM('active', 'inactive', 'out_of_stock') DEFAULT 'active',
-    views INT DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (category_id) REFERENCES categories(category_id),
-    FOREIGN KEY (brand_id) REFERENCES brands(brand_id)
-);
-```
+| Thành viên | Module phụ trách | Công việc chính |
+|------------|------------------|-----------------|
+| Nguyễn Văn A | RAG Core & Vector DB | - Xây dựng Vector Database<br>- Implement similarity search<br>- Document processing pipeline |
+| Trần Thị B | Chat Interface & Conversation | - Giao diện chat Streamlit<br>- WebSocket real-time<br>- Context synthesis strategies |
+| Lê Văn C | LLM & Admin | - LLM client management<br>- Admin dashboard<br>- System monitoring |
 
-#### Bảng Categories
-```sql
-CREATE TABLE categories (
-    category_id INT PRIMARY KEY AUTO_INCREMENT,
-    category_name VARCHAR(100) NOT NULL,
-    parent_id INT,
-    slug VARCHAR(100) UNIQUE,
-    description TEXT,
-    image_url VARCHAR(500),
-    sort_order INT DEFAULT 0,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (parent_id) REFERENCES categories(category_id)
-);
-```
+### 5.2. Timeline dự kiến
 
-#### Bảng Product_Images
-```sql
-CREATE TABLE product_images (
-    image_id INT PRIMARY KEY AUTO_INCREMENT,
-    product_id INT,
-    image_url VARCHAR(500) NOT NULL,
-    alt_text VARCHAR(200),
-    is_primary BOOLEAN DEFAULT FALSE,
-    sort_order INT DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE
-);
-```
+1. **Tuần 1-2:** Setup môi trường, cài đặt dependencies
+2. **Tuần 3-4:** Implement core modules (Vector DB, LLM Client)
+3. **Tuần 5-6:** Xây dựng Chat Interface và WebSocket
+4. **Tuần 7-8:** Develop Admin Dashboard và monitoring
+5. **Tuần 9-10:** Integration testing và optimization
+6. **Tuần 11-12:** User testing và documentation
 
-#### Bảng Product_Attributes
-```sql
-CREATE TABLE product_attributes (
-    attribute_id INT PRIMARY KEY AUTO_INCREMENT,
-    product_id INT,
-    attribute_name VARCHAR(100),
-    attribute_value VARCHAR(200),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE
-);
-```
+### 5.3. Các rủi ro và giải pháp
 
-### 2.2.2 Thiết kế lớp thực thể
+1. **Performance issues với LLM lớn:**
+   - Giải pháp: Sử dụng quantization, implement caching
 
-```java
-// Entity: Product
-public class Product {
-    private int productId;
-    private String productCode;
-    private String productName;
-    private String description;
-    private BigDecimal price;
-    private BigDecimal discountPrice;
-    private int quantity;
-    private Category category;
-    private Brand brand;
-    private ProductStatus status;
-    private List<ProductImage> images;
-    private List<ProductAttribute> attributes;
-    private int views;
-    private Date createdAt;
-    private Date updatedAt;
+2. **Context overflow:**
+   - Giải pháp: Implement multiple synthesis strategies
 
-    // Methods
-    public boolean isInStock() {
-        return quantity > 0 && status == ProductStatus.ACTIVE;
-    }
+3. **Real-time latency:**
+   - Giải pháp: Streaming response, async processing
 
-    public BigDecimal getFinalPrice() {
-        return discountPrice != null ? discountPrice : price;
-    }
-
-    // Constructors, getters, setters
-}
-
-// Entity: Category
-public class Category {
-    private int categoryId;
-    private String categoryName;
-    private Category parentCategory;
-    private String slug;
-    private String description;
-    private String imageUrl;
-    private int sortOrder;
-    private boolean isActive;
-    private List<Product> products;
-    private Date createdAt;
-
-    // Constructors, getters, setters
-}
-
-// Entity: ProductImage
-public class ProductImage {
-    private int imageId;
-    private int productId;
-    private String imageUrl;
-    private String altText;
-    private boolean isPrimary;
-    private int sortOrder;
-    private Date createdAt;
-
-    // Constructors, getters, setters
-}
-
-// Enum: ProductStatus
-public enum ProductStatus {
-    ACTIVE, INACTIVE, OUT_OF_STOCK
-}
-```
-
-### 2.2.3 Chức năng 1: THÊM SẢN PHẨM MỚI
-
-#### Thiết kế giao diện
-
-**Server Side - Admin Panel:**
-```
-┌───────────────────────────────────────────────┐
-│             THÊM SẢN PHẨM MỚI                │
-├───────────────────────────────────────────────┤
-│                                               │
-│ Mã sản phẩm:  [_______________] *            │
-│                                               │
-│ Tên sản phẩm: [_________________________] *  │
-│                                               │
-│ Danh mục:     [▼ Chọn danh mục        ] *    │
-│                                               │
-│ Thương hiệu:  [▼ Chọn thương hiệu     ]      │
-│                                               │
-│ Giá gốc:      [_______________] VNĐ *        │
-│                                               │
-│ Giá khuyến mãi: [_______________] VNĐ        │
-│                                               │
-│ Số lượng:     [_______________] *            │
-│                                               │
-│ Mô tả chi tiết:                              │
-│ ┌───────────────────────────────────────┐    │
-│ │                                       │    │
-│ │                                       │    │
-│ └───────────────────────────────────────┘    │
-│                                               │
-│ Hình ảnh:     [Choose Files] (Max: 5)        │
-│ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐         │
-│ │    │ │    │ │    │ │    │ │    │         │
-│ └────┘ └────┘ └────┘ └────┘ └────┘         │
-│                                               │
-│ Thuộc tính sản phẩm:                         │
-│ [+ Thêm thuộc tính]                          │
-│ ┌─────────────────┬─────────────────┐        │
-│ │ Tên thuộc tính  │  Giá trị        │        │
-│ ├─────────────────┼─────────────────┤        │
-│ │ Màu sắc        │ Đen, Trắng, Xanh│        │
-│ │ Kích thước     │ S, M, L, XL     │        │
-│ └─────────────────┴─────────────────┘        │
-│                                               │
-│    [Lưu sản phẩm]    [Hủy]                  │
-│                                               │
-└───────────────────────────────────────────────┘
-```
-
-**Client Side - Product Display:**
-```
-┌──────────────────────────────────────┐
-│         CHI TIẾT SẢN PHẨM           │
-├──────────────────────────────────────┤
-│ ┌──────────┐                         │
-│ │          │  Tên sản phẩm           │
-│ │  Hình    │  Giá: 500,000 VNĐ       │
-│ │   ảnh    │  ⭐⭐⭐⭐⭐ (4.5/5)        │
-│ │          │                         │
-│ └──────────┘  Số lượng: [1] [-][+]   │
-│                                      │
-│ [Thêm vào giỏ] [Mua ngay]          │
-│                                      │
-│ Mô tả sản phẩm:                     │
-│ ....................................  │
-│                                      │
-└──────────────────────────────────────┘
-```
-
-#### Biểu đồ lớp chi tiết
-
-```
-┌──────────────────────────┐
-│   ProductController      │
-├──────────────────────────┤
-│ - productService: IProdSvc│
-│ - validator: Validator   │
-│ - fileUpload: IFileUpload│
-├──────────────────────────┤
-│ + createProduct(): Resp  │
-│ + updateProduct(): Resp  │
-│ + deleteProduct(): Resp  │
-│ + getProducts(): List    │
-│ + uploadImages(): List   │
-└──────────────────────────┘
-            │
-            │ uses
-            ▼
-┌──────────────────────────┐
-│   ProductService         │
-├──────────────────────────┤
-│ - productRepo: IProdRepo │
-│ - categoryRepo: ICatRepo │
-│ - imageService: IImageSvc│
-│ - cacheService: ICache   │
-├──────────────────────────┤
-│ + addProduct(): Product  │
-│ + validateSKU(): bool    │
-│ + processImages(): void  │
-│ + updateStock(): void    │
-│ + calculatePrice(): BigDec│
-└──────────────────────────┘
-            │
-            │ uses
-            ▼
-┌──────────────────────────┐
-│   ProductRepository      │
-├──────────────────────────┤
-│ - db: DatabaseConnection │
-├──────────────────────────┤
-│ + save(prod: Product): int│
-│ + update(prod: Product)  │
-│ + findById(id: int): Prod│
-│ + findBySKU(sku: String) │
-│ + findByCategory(): List │
-└──────────────────────────┘
-```
-
-**Lý do thiết kế:**
-- **Controller**: Xử lý HTTP requests, validation đầu vào và upload files
-- **Service**: Chứa business logic phức tạp như tính giá, xử lý hình ảnh, cache
-- **Repository**: Quản lý truy xuất dữ liệu, tối ưu query
-- **Separation of Concerns**: Mỗi layer có trách nhiệm riêng biệt
-
-#### Biểu đồ hoạt động
-
-```
-┌─────────┐
-│  Start  │
-└────┬────┘
-     │
-     ▼
-┌──────────────────┐
-│ Nhập thông tin   │
-│   sản phẩm       │
-└────────┬─────────┘
-         │
-         ▼
-    ◇─────────◇
-   ╱           ╲
-  ╱  Validate   ╲     Không hợp lệ
- ◇  thông tin    ◇─────────────┐
-  ╲             ╱              │
-   ╲           ╱               │
-    ◇─────────◇                │
-         │ Hợp lệ              │
-         ▼                     │
-    ◇─────────◇                │
-   ╱           ╲               │
-  ╱   Mã SP     ╲   Đã có     │
- ◇   tồn tại?    ◇────────────┤
-  ╲             ╱              │
-   ╲           ╱               │
-    ◇─────────◇                │
-         │ Chưa có             │
-         ▼                     │
-┌──────────────────┐           │
-│ Upload hình ảnh  │           │
-└────────┬─────────┘           │
-         │                     │
-         ▼                     │
-    ◇─────────◇                │
-   ╱           ╲               │
-  ╱   Upload    ╲    Lỗi      │
- ◇   thành công? ◇────────────┤
-  ╲             ╱              │
-   ╲           ╱               │
-    ◇─────────◇                │
-         │ OK                  │
-         ▼                     │
-┌──────────────────┐           │
-│ Resize & optimize│           │
-│     images       │           │
-└────────┬─────────┘           │
-         │                     │
-         ▼                     │
-┌──────────────────┐           │
-│ Lưu thông tin SP │           │
-│   vào database   │           │
-└────────┬─────────┘           │
-         │                     │
-         ▼                     │
-┌──────────────────┐           │
-│ Clear cache      │           │
-└────────┬─────────┘           │
-         │                     │
-         ▼                     ▼
-┌──────────────────┐    ┌──────────────┐
-│ Thông báo thành  │    │ Hiển thị lỗi │
-│      công        │    └──────────────┘
-└────────┬─────────┘
-         │
-         ▼
-    ┌─────────┐
-    │   End   │
-    └─────────┘
-```
-
-#### Biểu đồ tuần tự
-
-```
-Admin           Controller      ProductService    ProductRepo      ImageService     Database
-  │                 │                 │                │                │               │
-  │──AddProduct───▶│                 │                │                │               │
-  │   Request      │                 │                │                │               │
-  │                │                 │                │                │               │
-  │                │──validate()────▶│                │                │               │
-  │                │                 │                │                │               │
-  │                │                 │──checkSKU─────▶│                │               │
-  │                │                 │                │──SELECT──────────────────────▶│
-  │                │                 │                │   FROM products              │
-  │                │                 │                │◀────────null─────────────────│
-  │                │                 │◀──not exists───│                │               │
-  │                │                 │                │                │               │
-  │                │──uploadImages──▶│                │                │               │
-  │                │                 │──processImg──────────────────▶│               │
-  │                │                 │                │                │──upload────▶│
-  │                │                 │                │                │   (S3/Local) │
-  │                │                 │                │                │◀───URLs─────│
-  │                │                 │◀──────────────image URLs──────│               │
-  │                │                 │                │                │               │
-  │                │──createProduct─▶│                │                │               │
-  │                │                 │──save─────────▶│                │               │
-  │                │                 │                │──INSERT INTO─────────────────▶│
-  │                │                 │                │   products                   │
-  │                │                 │                │◀────product_id───────────────│
-  │                │                 │                │                │               │
-  │                │                 │                │──INSERT INTO─────────────────▶│
-  │                │                 │                │ product_images               │
-  │                │                 │                │◀──────OK─────────────────────│
-  │                │                 │◀──product_id───│                │               │
-  │                │                 │                │                │               │
-  │                │                 │──clearCache()─▶│                │               │
-  │                │                 │                │                │               │
-  │                │◀──Product created│                │                │               │
-  │                │                 │                │                │               │
-  │◀──Response──────│                │                │                │               │
-  │   (success)    │                 │                │                │               │
-```
-
-### 2.2.4 Chức năng 2: TÌM KIẾM VÀ LỌC SẢN PHẨM
-
-#### Thiết kế giao diện
-
-**Client Side - Search & Filter:**
-```
-┌──────────────────────────────────────┐
-│      TÌM KIẾM SẢN PHẨM              │
-├──────────────────────────────────────┤
-│ [🔍 Nhập từ khóa...        ] [Tìm]   │
-│                                      │
-│ ┌─────────────┐ ┌──────────────────┐│
-│ │  BỘ LỌC     │ │   KẾT QUẢ       ││
-│ ├─────────────┤ │                  ││
-│ │Danh mục:    │ │ Tìm thấy: 25 SP  ││
-│ │[✓] Điện tử  │ │                  ││
-│ │[ ] Thời trang│ │ Sắp xếp: [▼Giá] ││
-│ │[ ] Gia dụng │ │                  ││
-│ │             │ │ ┌────┐ ┌────┐   ││
-│ │Giá:         │ │ │ SP1│ │ SP2│   ││
-│ │Min: [____]  │ │ └────┘ └────┘   ││
-│ │Max: [____]  │ │ ┌────┐ ┌────┐   ││
-│ │             │ │ │ SP3│ │ SP4│   ││
-│ │Thương hiệu: │ │ └────┘ └────┘   ││
-│ │[✓] Samsung  │ │                  ││
-│ │[ ] Apple    │ │ [1][2][3]...[10] ││
-│ └─────────────┘ └──────────────────┘│
-└──────────────────────────────────────┘
-```
-
-#### Biểu đồ lớp chi tiết
-
-```
-┌──────────────────────────┐
-│   SearchController       │
-├──────────────────────────┤
-│ - searchService: ISearch │
-│ - filterBuilder: IFilter │
-├──────────────────────────┤
-│ + search(): SearchResult │
-│ + filter(): List<Product>│
-│ + suggest(): List<String>│
-└──────────────────────────┘
-            │
-            │ uses
-            ▼
-┌──────────────────────────┐
-│   SearchService          │
-├──────────────────────────┤
-│ - productRepo: IProdRepo │
-│ - elasticClient: IElastic│
-│ - cacheService: ICache   │
-├──────────────────────────┤
-│ + searchProducts(): List │
-│ + buildQuery(): Query    │
-│ + applyFilters(): List   │
-│ + rankResults(): List    │
-│ + indexProduct(): void   │
-└──────────────────────────┘
-```
-
-#### Biểu đồ hoạt động & tuần tự (Tương tự cấu trúc như trên)
+4. **Accuracy của RAG:**
+   - Giải pháp: Fine-tune embeddings, improve chunking strategy
 
 ---
 
-## 2.3 THIẾT KẾ CHI TIẾT - PHẠM VĂN THUÂN (MÃ SV: 20210003)
-### Module: Quản lý đơn hàng
-
-### 2.3.1 Thiết kế CSDL
-
-#### Bảng Orders
-```sql
-CREATE TABLE orders (
-    order_id INT PRIMARY KEY AUTO_INCREMENT,
-    order_code VARCHAR(50) UNIQUE NOT NULL,
-    user_id INT NOT NULL,
-    total_amount DECIMAL(10, 2) NOT NULL,
-    discount_amount DECIMAL(10, 2) DEFAULT 0,
-    shipping_fee DECIMAL(10, 2) DEFAULT 0,
-    final_amount DECIMAL(10, 2) NOT NULL,
-    payment_method ENUM('cod', 'bank_transfer', 'credit_card', 'e_wallet'),
-    payment_status ENUM('pending', 'paid', 'failed', 'refunded') DEFAULT 'pending',
-    order_status ENUM('pending', 'confirmed', 'processing', 'shipping', 'delivered', 'cancelled') DEFAULT 'pending',
-    shipping_address TEXT,
-    shipping_phone VARCHAR(20),
-    notes TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(user_id)
-);
-```
-
-#### Bảng Order_Items
-```sql
-CREATE TABLE order_items (
-    item_id INT PRIMARY KEY AUTO_INCREMENT,
-    order_id INT NOT NULL,
-    product_id INT NOT NULL,
-    quantity INT NOT NULL,
-    unit_price DECIMAL(10, 2) NOT NULL,
-    discount_price DECIMAL(10, 2),
-    subtotal DECIMAL(10, 2) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE,
-    FOREIGN KEY (product_id) REFERENCES products(product_id)
-);
-```
-
-#### Bảng Cart
-```sql
-CREATE TABLE cart (
-    cart_id INT PRIMARY KEY AUTO_INCREMENT,
-    user_id INT NOT NULL,
-    product_id INT NOT NULL,
-    quantity INT NOT NULL DEFAULT 1,
-    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY unique_user_product (user_id, product_id),
-    FOREIGN KEY (user_id) REFERENCES users(user_id),
-    FOREIGN KEY (product_id) REFERENCES products(product_id)
-);
-```
-
-#### Bảng Payment_Transactions
-```sql
-CREATE TABLE payment_transactions (
-    transaction_id INT PRIMARY KEY AUTO_INCREMENT,
-    order_id INT NOT NULL,
-    transaction_code VARCHAR(100) UNIQUE,
-    payment_method VARCHAR(50),
-    amount DECIMAL(10, 2) NOT NULL,
-    status ENUM('pending', 'success', 'failed', 'cancelled') DEFAULT 'pending',
-    gateway_response TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMP NULL,
-    FOREIGN KEY (order_id) REFERENCES orders(order_id)
-);
-```
-
-### 2.3.2 Thiết kế lớp thực thể
-
-```java
-// Entity: Order
-public class Order {
-    private int orderId;
-    private String orderCode;
-    private User user;
-    private BigDecimal totalAmount;
-    private BigDecimal discountAmount;
-    private BigDecimal shippingFee;
-    private BigDecimal finalAmount;
-    private PaymentMethod paymentMethod;
-    private PaymentStatus paymentStatus;
-    private OrderStatus orderStatus;
-    private String shippingAddress;
-    private String shippingPhone;
-    private String notes;
-    private List<OrderItem> orderItems;
-    private Date createdAt;
-    private Date updatedAt;
-
-    // Methods
-    public void calculateTotal() {
-        this.totalAmount = orderItems.stream()
-            .map(OrderItem::getSubtotal)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-        this.finalAmount = totalAmount
-            .subtract(discountAmount)
-            .add(shippingFee);
-    }
-
-    // Constructors, getters, setters
-}
-
-// Entity: OrderItem
-public class OrderItem {
-    private int itemId;
-    private int orderId;
-    private Product product;
-    private int quantity;
-    private BigDecimal unitPrice;
-    private BigDecimal discountPrice;
-    private BigDecimal subtotal;
-    private Date createdAt;
-
-    public void calculateSubtotal() {
-        BigDecimal price = discountPrice != null ? discountPrice : unitPrice;
-        this.subtotal = price.multiply(BigDecimal.valueOf(quantity));
-    }
-
-    // Constructors, getters, setters
-}
-
-// Entity: Cart
-public class Cart {
-    private int cartId;
-    private User user;
-    private Product product;
-    private int quantity;
-    private Date addedAt;
-    private Date updatedAt;
-
-    // Constructors, getters, setters
-}
-
-// Enums
-public enum OrderStatus {
-    PENDING, CONFIRMED, PROCESSING, SHIPPING, DELIVERED, CANCELLED
-}
-
-public enum PaymentStatus {
-    PENDING, PAID, FAILED, REFUNDED
-}
-
-public enum PaymentMethod {
-    COD, BANK_TRANSFER, CREDIT_CARD, E_WALLET
-}
-```
-
-### 2.3.3 Chức năng 1: GIỎ HÀNG VÀ ĐẶT HÀNG
-
-#### Thiết kế giao diện
-
-**Client Side - Shopping Cart:**
-```
-┌──────────────────────────────────────┐
-│            GIỎ HÀNG                  │
-├──────────────────────────────────────┤
-│                                      │
-│ ┌────────────────────────────────┐  │
-│ │ [✓] │ Sản phẩm A │ SL: [-][2][+]│ │
-│ │     │ 500,000đ   │ = 1,000,000đ│ │
-│ │     │            │ [Xóa]       │ │
-│ ├────────────────────────────────┤  │
-│ │ [✓] │ Sản phẩm B │ SL: [-][1][+]│ │
-│ │     │ 300,000đ   │ = 300,000đ  │ │
-│ │     │            │ [Xóa]       │ │
-│ └────────────────────────────────┘  │
-│                                      │
-│ Tạm tính:           1,300,000 VNĐ   │
-│ Phí vận chuyển:        30,000 VNĐ   │
-│ ─────────────────────────────────    │
-│ Tổng cộng:          1,330,000 VNĐ   │
-│                                      │
-│ Mã giảm giá: [___________] [Áp dụng]│
-│                                      │
-│ [Tiếp tục mua hàng] [Thanh toán]    │
-└──────────────────────────────────────┘
-```
-
-**Client Side - Checkout:**
-```
-┌──────────────────────────────────────┐
-│          THANH TOÁN                  │
-├──────────────────────────────────────┤
-│ THÔNG TIN GIAO HÀNG                 │
-│                                      │
-│ Họ tên:     [___________________]   │
-│ Điện thoại: [___________________]   │
-│ Địa chỉ:    [___________________]   │
-│             [___________________]   │
-│                                      │
-│ PHƯƠNG THỨC THANH TOÁN              │
-│ ( ) Thanh toán khi nhận hàng (COD)  │
-│ ( ) Chuyển khoản ngân hàng          │
-│ (●) Thẻ tín dụng/Debit              │
-│ ( ) Ví điện tử                      │
-│                                      │
-│ THÔNG TIN ĐƠN HÀNG                  │
-│ ┌────────────────────────────┐      │
-│ │ 2 sản phẩm    1,300,000đ │      │
-│ │ Vận chuyển       30,000đ │      │
-│ │ Giảm giá        -50,000đ │      │
-│ │ ───────────────────────── │      │
-│ │ Tổng:        1,280,000đ  │      │
-│ └────────────────────────────┘      │
-│                                      │
-│ Ghi chú: [___________________]      │
-│                                      │
-│    [Đặt hàng]    [Quay lại]        │
-└──────────────────────────────────────┘
-```
-
-#### Biểu đồ lớp chi tiết
-
-```
-┌──────────────────────────┐
-│   OrderController        │
-├──────────────────────────┤
-│ - orderService: IOrderSvc│
-│ - cartService: ICartSvc  │
-│ - paymentSvc: IPaymentSvc│
-├──────────────────────────┤
-│ + addToCart(): Response  │
-│ + updateCart(): Response │
-│ + checkout(): Response   │
-│ + placeOrder(): Order    │
-│ + getOrderStatus(): Status│
-└──────────────────────────┘
-            │
-            │ uses
-            ▼
-┌──────────────────────────┐
-│   OrderService           │
-├──────────────────────────┤
-│ - orderRepo: IOrderRepo  │
-│ - productRepo: IProdRepo │
-│ - inventorySvc: IInventory│
-│ - emailService: IEmail   │
-├──────────────────────────┤
-│ + createOrder(): Order   │
-│ + validateStock(): bool  │
-│ + reserveStock(): bool   │
-│ + calculateTotal(): BigDec│
-│ + processPayment(): bool │
-│ + sendConfirmation(): void│
-└──────────────────────────┘
-            │
-            │ uses
-            ▼
-┌──────────────────────────┐
-│   OrderRepository        │
-├──────────────────────────┤
-│ - db: DatabaseConnection │
-├──────────────────────────┤
-│ + save(order: Order): int│
-│ + findById(id: int): Order│
-│ + findByUser(uid: int):List│
-│ + updateStatus(): bool   │
-└──────────────────────────┘
-```
-
-**Lý do thiết kế:**
-- **Controller**: Điều phối luồng đặt hàng từ giỏ hàng đến thanh toán
-- **Service**: Xử lý logic phức tạp như kiểm tra tồn kho, tính toán, thanh toán
-- **Repository**: Quản lý transaction đảm bảo tính toàn vẹn dữ liệu
-- **Integration**: Tích hợp với các service khác (inventory, payment, email)
-
-#### Biểu đồ hoạt động
-
-```
-┌─────────┐
-│  Start  │
-└────┬────┘
-     │
-     ▼
-┌──────────────────┐
-│ Xem giỏ hàng     │
-└────────┬─────────┘
-         │
-         ▼
-    ◇─────────◇
-   ╱           ╲
-  ╱  Giỏ hàng   ╲     Rỗng
- ◇   có SP?      ◇────────────┐
-  ╲             ╱             │
-   ╲           ╱              │
-    ◇─────────◇               │
-         │ Có                 │
-         ▼                    │
-┌──────────────────┐          │
-│ Nhập thông tin   │          │
-│   giao hàng      │          │
-└────────┬─────────┘          │
-         │                    │
-         ▼                    │
-    ◇─────────◇               │
-   ╱           ╲              │
-  ╱  Validate   ╲   Invalid   │
- ◇   thông tin   ◇───────────┤
-  ╲             ╱             │
-   ╲           ╱              │
-    ◇─────────◇               │
-         │ Valid              │
-         ▼                    │
-┌──────────────────┐          │
-│ Chọn phương thức │          │
-│   thanh toán     │          │
-└────────┬─────────┘          │
-         │                    │
-         ▼                    │
-┌──────────────────┐          │
-│ Kiểm tra tồn kho │          │
-└────────┬─────────┘          │
-         │                    │
-         ▼                    │
-    ◇─────────◇               │
-   ╱           ╲              │
-  ╱   Đủ hàng   ╲   Không đủ │
- ◇     ?         ◇───────────┤
-  ╲             ╱             │
-   ╲           ╱              │
-    ◇─────────◇               │
-         │ Đủ                 │
-         ▼                    │
-┌──────────────────┐          │
-│ Reserve inventory│          │
-└────────┬─────────┘          │
-         │                    │
-         ▼                    │
-┌──────────────────┐          │
-│ Xử lý thanh toán │          │
-└────────┬─────────┘          │
-         │                    │
-         ▼                    │
-    ◇─────────◇               │
-   ╱           ╲              │
-  ╱  Thanh toán ╲    Lỗi     │
- ◇   thành công? ◇───────────┤
-  ╲             ╱             │
-   ╲           ╱              │
-    ◇─────────◇               │
-         │ OK                 │
-         ▼                    │
-┌──────────────────┐          │
-│ Tạo đơn hàng     │          │
-└────────┬─────────┘          │
-         │                    │
-         ▼                    │
-┌──────────────────┐          │
-│ Gửi email xác    │          │
-│     nhận         │          │
-└────────┬─────────┘          │
-         │                    │
-         ▼                    ▼
-┌──────────────────┐   ┌──────────────┐
-│ Hiển thị mã đơn  │   │ Thông báo lỗi│
-└────────┬─────────┘   └──────────────┘
-         │
-         ▼
-    ┌─────────┐
-    │   End   │
-    └─────────┘
-```
-
-#### Biểu đồ tuần tự
-
-```
-Client        Controller     OrderService    ProductRepo    PaymentSvc    OrderRepo      Database
-  │               │               │              │              │             │              │
-  │──Checkout───▶│               │              │              │             │              │
-  │               │               │              │              │             │              │
-  │               │──getCart()───▶│              │              │             │              │
-  │               │◀──cartItems───│              │              │             │              │
-  │               │               │              │              │             │              │
-  │               │──validateStock▶             │              │             │              │
-  │               │               │──checkStock─▶│              │             │              │
-  │               │               │              │──SELECT──────────────────────────────▶│
-  │               │               │              │   products                            │
-  │               │               │              │◀──────────stock levels────────────────│
-  │               │               │◀──inStock────│              │             │              │
-  │               │               │              │              │             │              │
-  │──PlaceOrder──▶│              │              │              │             │              │
-  │               │──createOrder─▶│              │              │             │              │
-  │               │               │              │              │             │              │
-  │               │               │──reserveStock▶             │             │              │
-  │               │               │              │──UPDATE──────────────────────────────▶│
-  │               │               │              │  quantity                             │
-  │               │               │              │◀────────────OK─────────────────────────│
-  │               │               │◀──reserved───│              │             │              │
-  │               │               │              │              │             │              │
-  │               │               │──processPayment────────────▶│            │              │
-  │               │               │              │              │──charge()─▶│              │
-  │               │               │              │              │◀──success──│              │
-  │               │               │◀─────────────payment OK─────│            │              │
-  │               │               │              │              │             │              │
-  │               │               │──saveOrder──────────────────────────────▶│              │
-  │               │               │              │              │             │──INSERT────▶│
-  │               │               │              │              │             │   orders    │
-  │               │               │              │              │             │◀──order_id──│
-  │               │               │◀─────────────order created───────────────│              │
-  │               │               │              │              │             │              │
-  │               │               │──sendEmail()─▶             │             │              │
-  │               │               │              │              │             │              │
-  │               │◀──Order#12345─│              │              │             │              │
-  │               │               │              │              │             │              │
-  │◀──Response────│              │              │              │             │              │
-  │  (order info) │               │              │              │             │              │
-```
-
-### 2.3.4 Chức năng 2: THEO DÕI ĐƠN HÀNG
-
-#### Thiết kế giao diện
-
-**Client Side - Order Tracking:**
-```
-┌──────────────────────────────────────┐
-│       THEO DÕI ĐƠN HÀNG             │
-├──────────────────────────────────────┤
-│ Mã đơn: #ORD-2024-001234            │
-│ Ngày đặt: 15/01/2024 10:30          │
-│                                      │
-│ TRẠNG THÁI ĐƠN HÀNG                 │
-│                                      │
-│ [✓]──[✓]──[✓]──[●]──[ ]──[ ]       │
-│  Đặt  Xác  Đóng  Vận  Giao Hoàn    │
-│ hàng  nhận  gói  chuyển hàng tất    │
-│                                      │
-│ Trạng thái hiện tại: Đang vận chuyển│
-│ Dự kiến giao: 18/01/2024            │
-│                                      │
-│ CHI TIẾT ĐƠN HÀNG                   │
-│ ┌────────────────────────────────┐  │
-│ │ 1. Sản phẩm A x2   1,000,000đ │  │
-│ │ 2. Sản phẩm B x1     300,000đ │  │
-│ └────────────────────────────────┘  │
-│                                      │
-│ Địa chỉ giao: 123 ABC, Q1, TP.HCM   │
-│ SĐT: 0901234567                     │
-│                                      │
-│ [Hủy đơn]  [Liên hệ hỗ trợ]        │
-└──────────────────────────────────────┘
-```
-
-**Server Side - Order Management:**
-```
-┌───────────────────────────────────────────────┐
-│          QUẢN LÝ ĐƠN HÀNG                   │
-├───────────────────────────────────────────────┤
-│ Bộ lọc: [▼Tất cả] [▼Hôm nay] [Tìm kiếm___] │
-│                                               │
-│ ┌───┬──────────┬──────────┬────────────────┐│
-│ │STT│ Mã đơn   │Khách hàng│ Trạng thái     ││
-│ ├───┼──────────┼──────────┼────────────────┤│
-│ │ 1 │ORD-1234 │ Nguyễn A │ ⚪ Chờ xác nhận││
-│ │ 2 │ORD-1235 │ Trần B   │ 🟡 Đang xử lý  ││
-│ │ 3 │ORD-1236 │ Lê C     │ 🟢 Đang giao   ││
-│ │ 4 │ORD-1237 │ Phạm D   │ ✅ Hoàn thành  ││
-│ └───┴──────────┴──────────┴────────────────┘│
-│                                               │
-│ [Export Excel] [In báo cáo] [Cập nhật lọc]  │
-└───────────────────────────────────────────────┘
-```
-
-#### Biểu đồ lớp và các biểu đồ khác (tương tự cấu trúc đã trình bày ở trên)
-
----
-
-# PHẦN 3: TỔNG KẾT
-
-## 3.1 Tích hợp các module
-
-Hệ thống được thiết kế theo kiến trúc microservices với 3 module chính:
-- Module Quản lý người dùng (Trang): Xử lý authentication, authorization
-- Module Quản lý sản phẩm (Trọng): Quản lý catalog, inventory
-- Module Quản lý đơn hàng (Thuân): Xử lý đặt hàng, thanh toán
-
-Các module giao tiếp qua RESTful API và message queue để đảm bảo loose coupling.
-
-## 3.2 Kế hoạch triển khai
-
-1. **Phase 1**: Xây dựng core services và database
-2. **Phase 2**: Phát triển APIs và business logic
-3. **Phase 3**: Xây dựng UI/UX cho client và admin
-4. **Phase 4**: Testing và optimization
-5. **Phase 5**: Deployment và monitoring
-
-## 3.3 Công nghệ và tools
-
-- Version Control: Git/GitHub
-- Project Management: Jira/Trello
-- CI/CD: Jenkins/GitLab CI
-- Container: Docker/Kubernetes
-- Monitoring: Prometheus/Grafana
-
----
-
-**KẾT THÚC BÁO CÁO**
+**Ghi chú:** Báo cáo này được thiết kế cho hệ thống Chatbot tư vấn thông tin trường PTIT sử dụng kiến trúc RAG với các công nghệ open-source hiện đại. Thiết kế có thể được điều chỉnh dựa trên feedback và yêu cầu cụ thể của dự án.
