@@ -1,9 +1,9 @@
-# BÁO CÁO THIẾT KẾ HỆ THỐNG THƯƠNG MẠI ĐIỆN TỬ
+# BÁO CÁO THIẾT KẾ HỆ THỐNG CHATBOT TƯ VẤN THÔNG TIN TRƯỜNG PTIT
 
 ## Nhóm thực hiện
-1. **Nguyễn Thị Trang** - Mã SV: 20210001 - Module Quản lý người dùng
-2. **Lê Văn Trọng** - Mã SV: 20210002 - Module Quản lý sản phẩm
-3. **Phạm Văn Thuân** - Mã SV: 20210003 - Module Quản lý đơn hàng
+1. **Nguyễn Thị Trang** - Mã SV: 20210001 - Module Quản lý người dùng và xác thực
+2. **Lê Văn Trọng** - Mã SV: 20210002 - Module Xử lý ngôn ngữ tự nhiên (NLP) và trả lời
+3. **Phạm Văn Thuân** - Mã SV: 20210003 - Module Quản lý cơ sở tri thức và dữ liệu
 
 ---
 
