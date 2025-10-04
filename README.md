@@ -1,1554 +1,994 @@
-# BÁO CÁO THIẾT KẾ HỆ THỐNG CHATBOT TƯ VẤN THÔNG TIN TRƯỜNG PTIT
+# BÁO CÁO THIẾT KẾ MODULE 2: CHATBOT APPLICATION & RAG MODULE
 
-## PHẦN 1: THIẾT KẾ KIẾN TRÚC HỆ THỐNG (CHUNG CHO CẢ NHÓM)
-
-### 1.1. Tổng quan kiến trúc
-
-Hệ thống Chatbot tư vấn thông tin trường PTIT được xây dựng dựa trên kiến trúc RAG (Retrieval-Augmented Generation) với các thành phần chính sau:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Client Layer                           │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │   Web UI     │  │   Admin UI   │  │  Mobile App  │      │
-│  │ (Streamlit)  │  │              │  │   (Future)   │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                    ┌─────────▼─────────┐
-                    │   API Gateway      │
-                    │   (WebSocket)      │
-                    └─────────┬─────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                     Application Layer                         │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │ Conversation │  │   Context    │  │   Response   │      │
-│  │   Handler    │  │  Synthesis   │  │  Generator   │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │    Query     │  │  Document    │  │   Admin      │      │
-│  │   Refiner    │  │   Loader     │  │  Services    │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                      Core Services Layer                      │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │   LLM Client │  │   Embedder   │  │    Chat      │      │
-│  │  (LlamaCpp)  │  │   Service    │  │   History    │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                       Data Layer                              │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │Vector Store  │  │  Document    │  │    Model     │      │
-│  │  (Chroma)    │  │   Storage    │  │   Storage    │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### 1.2. Luồng xử lý chính
-
-1. **Luồng xử lý câu hỏi của người dùng:**
-   - Người dùng nhập câu hỏi qua giao diện Web UI
-   - Câu hỏi được gửi qua WebSocket tới Application Layer
-   - Query Refiner tinh chỉnh câu hỏi để tối ưu cho việc tìm kiếm
-   - Embedder Service chuyển đổi câu hỏi thành vector embedding
-   - Vector Store (Chroma) tìm kiếm các đoạn văn bản liên quan nhất
-   - Context Synthesis Strategy tổng hợp context từ các đoạn văn bản
-   - LLM Client (LlamaCpp) sinh câu trả lời dựa trên context
-   - Response được trả về cho người dùng qua WebSocket
-
-2. **Luồng xử lý dữ liệu đầu vào:**
-   - Admin upload tài liệu (PDF, MD, TXT) về thông tin trường PTIT
-   - Document Loader đọc và xử lý tài liệu
-   - Text Splitter chia tài liệu thành các chunks nhỏ
-   - Embedder Service tạo embeddings cho mỗi chunk
-   - Lưu embeddings và metadata vào Vector Store
-
-### 1.3. Các công nghệ sử dụng
-
-- **Frontend:** Streamlit (Web UI)
-- **Backend:** Python 3.10+
-- **LLM Framework:** llama-cpp-python
-- **Vector Database:** ChromaDB
-- **Embeddings Model:** all-MiniLM-L6-v2
-- **LLM Models:** Llama 3.1, Qwen 2.5, OpenChat 3.6
-- **Communication:** WebSocket, REST API
-
-### 1.4. Các patterns và nguyên tắc thiết kế
-
-- **Singleton Pattern:** Áp dụng cho LLM Client, Vector Store
-- **Strategy Pattern:** Context Synthesis Strategies
-- **Factory Pattern:** Model Registry
-- **Repository Pattern:** Document Storage, Vector Database
-- **SOLID Principles:**
-  - Single Responsibility: Mỗi class chỉ đảm nhận một chức năng
-  - Open/Closed: Dễ dàng mở rộng thêm model, strategy mới
-  - Dependency Inversion: Sử dụng abstraction cho các dependencies
+**Sinh viên thực hiện:** [Tên bạn]
+**Mã sinh viên:** [MSSV]
+**Lớp:** [Tên lớp]
 
 ---
 
-## PHẦN 2: THIẾT KẾ CHI TIẾT - BẠN THỨ NHẤT
+## 1. TỔNG QUAN MODULE
 
-**Họ tên:** Nguyễn Văn A
-**Mã SV:** B21DCCN001
-**Phụ trách:** Module RAG Core và Vector Database
+### 1.1. Vai trò trong hệ thống
+Module 2 đóng vai trò là **trung tâm xử lý RAG (Retrieval-Augmented Generation)** và cung cấp API chatbot cho người dùng cuối. Module này:
+- Nhận câu hỏi từ Client 2 (Customer)
+- Tìm kiếm thông tin liên quan từ vector database
+- Tổng hợp context và sinh câu trả lời qua LLM
+- Tích hợp model từ Server 1
+- Trả kết quả về Client 2
 
-### 2.1. Thiết kế CSDL liên quan module
+### 1.2. Chức năng chính
+1. **RAG Query Processing**: Xử lý câu hỏi và truy xuất thông tin
+2. **Vector Database Management**: Quản lý embedding và similarity search
+3. **Context Synthesis**: Tổng hợp context từ nhiều nguồn
+4. **LLM Integration**: Tích hợp với LLM để sinh câu trả lời
+5. **API Service**: Cung cấp RESTful API cho Client
 
-#### 2.1.1. Schema Vector Database (ChromaDB)
+### 1.3. Công nghệ sử dụng
+- **Backend Framework**: FastAPI / Flask
+- **Vector Database**: ChromaDB / Pinecone
+- **LLM**: OpenAI API / Local LLM
+- **Embedding Model**: sentence-transformers / OpenAI embeddings
+- **Cache**: Redis (optional)
 
-```sql
--- Collection: documents_embeddings
-CREATE TABLE documents_embeddings (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    embedding VECTOR(384), -- 384 dimensions for all-MiniLM-L6-v2
-    document TEXT NOT NULL,
-    metadata JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+---
 
--- Index for vector similarity search
-CREATE INDEX idx_embedding_cosine ON documents_embeddings
-USING ivfflat (embedding vector_cosine_ops)
-WITH (lists = 100);
+## 2. THIẾT KẾ CƠ SỞ DỮ LIỆU
 
--- Metadata structure
--- {
---   "source": "student_handbook.pdf",
---   "page": 12,
---   "chapter": "Quy chế đào tạo",
---   "section": "Điều kiện tốt nghiệp",
---   "chunk_id": "doc_001_chunk_042",
---   "created_date": "2024-01-15"
--- }
+### 2.1. Vector Database Schema (ChromaDB)
+
+#### Collection: `ptit_knowledge_base`
+```python
+{
+    "id": "doc_001",
+    "document": "Nội dung văn bản gốc",
+    "metadata": {
+        "source": "ptit_tuyen_sinh.pdf",
+        "category": "tuyen_sinh",
+        "chunk_index": 0,
+        "timestamp": "2025-01-15T10:30:00Z",
+        "version": "v1.0"
+    },
+    "embedding": [0.123, 0.456, ...] # Vector 384 chiều
+}
 ```
 
-#### 2.1.2. Schema Chat History
+**Giải thích:**
+- `id`: Unique identifier cho mỗi chunk
+- `document`: Văn bản đã được chunking
+- `metadata.source`: File nguồn gốc
+- `metadata.category`: Danh mục (tuyển sinh, học phí, chương trình đào tạo, v.v.)
+- `metadata.chunk_index`: Thứ tự chunk trong document
+- `embedding`: Vector đại diện ngữ nghĩa
 
+### 2.2. Cache Database Schema (Redis - Optional)
+
+#### Key Pattern: `query_cache:{query_hash}`
+```json
+{
+    "query": "Học phí ngành CNTT là bao nhiêu?",
+    "response": {
+        "answer": "Học phí ngành CNTT là...",
+        "sources": ["doc_001", "doc_045"],
+        "confidence": 0.92
+    },
+    "timestamp": 1705310400,
+    "ttl": 3600
+}
+```
+
+### 2.3. Conversation History Schema (MongoDB/PostgreSQL)
+
+#### Table: `conversations`
 ```sql
-CREATE TABLE chat_sessions (
-    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id VARCHAR(255),
+CREATE TABLE conversations (
+    conversation_id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'active'
 );
+```
 
-CREATE TABLE chat_messages (
-    message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id UUID REFERENCES chat_sessions(session_id),
-    role VARCHAR(50) NOT NULL, -- 'user', 'assistant', 'system'
+#### Table: `messages`
+```sql
+CREATE TABLE messages (
+    message_id VARCHAR(36) PRIMARY KEY,
+    conversation_id VARCHAR(36) REFERENCES conversations(conversation_id),
+    role VARCHAR(10) NOT NULL, -- 'user' or 'assistant'
     content TEXT NOT NULL,
-    metadata JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    sources JSON, -- [{doc_id, score, snippet}, ...]
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata JSON -- {model_version, response_time, etc.}
 );
-
-CREATE INDEX idx_session_messages ON chat_messages(session_id, created_at);
 ```
 
-### 2.2. Thiết kế lớp thực thể
+---
 
-#### 2.2.1. Document Entity
+## 3. THIẾT KẾ LỚP THỰC THỂ (CLASS DIAGRAM)
 
-```python
-from dataclasses import dataclass
-from typing import Dict, Any, Optional
-from datetime import datetime
-
-@dataclass
-class Document:
-    """Entity representing a document chunk"""
-    page_content: str
-    metadata: Dict[str, Any]
-    embedding: Optional[List[float]] = None
-    document_id: Optional[str] = None
-    created_at: Optional[datetime] = None
-
-    def to_dict(self) -> Dict:
-        return {
-            'page_content': self.page_content,
-            'metadata': self.metadata,
-            'embedding': self.embedding,
-            'document_id': self.document_id,
-            'created_at': self.created_at.isoformat() if self.created_at else None
-        }
-```
-
-#### 2.2.2. ChatMessage Entity
-
-```python
-@dataclass
-class ChatMessage:
-    """Entity representing a chat message"""
-    role: str  # 'user', 'assistant', 'system'
-    content: str
-    session_id: Optional[str] = None
-    message_id: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
-    created_at: Optional[datetime] = None
-```
-
-### 2.3. Chức năng 1: Similarity Search với Vector Database
-
-#### 2.3.1. Thiết kế giao diện
-
-```
-┌─────────────────────────────────────────────┐
-│          SIMILARITY SEARCH INTERFACE         │
-├─────────────────────────────────────────────┤
-│                                              │
-│  Query: [________________________] [Search] │
-│                                              │
-│  Advanced Options:                          │
-│  ├─ Top K Results: [5 ▼]                   │
-│  ├─ Threshold: [0.7 ▼]                     │
-│  └─ Filter by: [All Categories ▼]          │
-│                                              │
-│  Results:                                    │
-│  ┌────────────────────────────────────────┐ │
-│  │ 📄 Document: student_handbook.pdf      │ │
-│  │    Score: 0.92                         │ │
-│  │    Preview: "Điều kiện tốt nghiệp..."  │ │
-│  └────────────────────────────────────────┘ │
-│  ┌────────────────────────────────────────┐ │
-│  │ 📄 Document: admission_guide.pdf       │ │
-│  │    Score: 0.85                         │ │
-│  │    Preview: "Quy trình xét tuyển..."   │ │
-│  └────────────────────────────────────────┘ │
-│                                              │
-└─────────────────────────────────────────────┘
-```
-
-#### 2.3.2. Thiết kế lớp chi tiết
+### 3.1. Entity Classes
 
 ```mermaid
 classDiagram
-    class Chroma {
-        -ChromaClient client
-        -Embedder embedding
-        -str persist_directory
-        -Collection collection
-        +__init__(persist_directory, embedding)
-        +add_texts(texts, metadatas, ids)
-        +similarity_search(query, k, filter)
-        +similarity_search_with_threshold(query, k, threshold)
-        +similarity_search_with_relevance_scores(query, k)
-        -__query_collection(query_texts, query_embeddings, n_results)
-        -__select_relevance_score_fn()
-    }
-
-    class Embedder {
-        -SentenceTransformer model
-        -str model_name
-        -int embedding_dim
-        +__init__(model_name)
-        +embed_documents(texts)
-        +embed_query(query)
-        +get_embedding_dimension()
-    }
-
     class Document {
-        +str page_content
-        +dict metadata
-        +str document_id
-        +datetime created_at
-        +to_dict()
+        +String id
+        +String content
+        +DocumentMetadata metadata
+        +List~float~ embedding
+        +getChunks() List~str~
+        +toDict() dict
     }
 
-    class DistanceMetric {
-        <<enumeration>>
-        L2
-        COSINE
-        IP
+    class DocumentMetadata {
+        +String source
+        +String category
+        +int chunkIndex
+        +DateTime timestamp
+        +String version
+        +toDict() dict
     }
 
-    class RelevanceScoreCalculator {
-        +get_relevance_score_fn(distance_metric)
-        +euclidean_relevance_score_fn(distance)
-        +cosine_relevance_score_fn(distance)
-        +max_inner_product_relevance_score_fn(distance)
+    class Query {
+        +String queryId
+        +String userId
+        +String text
+        +DateTime timestamp
+        +toEmbedding() List~float~
     }
 
-    Chroma --> Embedder : uses
-    Chroma --> Document : returns
-    Chroma --> DistanceMetric : uses
-    Chroma --> RelevanceScoreCalculator : uses
+    class SearchResult {
+        +String documentId
+        +String content
+        +float score
+        +DocumentMetadata metadata
+        +toString() str
+    }
+
+    class ChatResponse {
+        +String answer
+        +List~SearchResult~ sources
+        +float confidence
+        +String modelVersion
+        +int responseTime
+        +toJSON() dict
+    }
+
+    class Conversation {
+        +String conversationId
+        +String userId
+        +List~Message~ messages
+        +DateTime createdAt
+        +addMessage(Message) void
+        +getContext(int) str
+    }
+
+    class Message {
+        +String messageId
+        +String conversationId
+        +String role
+        +String content
+        +List~SearchResult~ sources
+        +DateTime createdAt
+        +toDict() dict
+    }
+
+    Document "1" *-- "1" DocumentMetadata
+    SearchResult "1" *-- "1" DocumentMetadata
+    ChatResponse "1" *-- "*" SearchResult
+    Conversation "1" *-- "*" Message
 ```
 
-**Giải thích thiết kế:**
-- **Chroma**: Lớp chính quản lý vector database, cung cấp các phương thức tìm kiếm
-- **Embedder**: Chịu trách nhiệm chuyển đổi text thành vector embeddings
-- **Document**: Entity đại diện cho một chunk văn bản
-- **DistanceMetric**: Enum định nghĩa các loại distance metrics
-- **RelevanceScoreCalculator**: Tính toán độ liên quan dựa trên distance
+**Giải thích các lớp:**
 
-#### 2.3.3. Biểu đồ hoạt động
+1. **Document**: Đại diện cho một document chunk trong vector DB
+   - `getChunks()`: Chia nhỏ document thành chunks
+   - `toDict()`: Chuyển sang dictionary để lưu vào DB
+
+2. **DocumentMetadata**: Metadata của document
+   - Lưu thông tin nguồn gốc, phân loại, version
+
+3. **Query**: Đại diện cho câu hỏi từ user
+   - `toEmbedding()`: Chuyển text thành vector embedding
+
+4. **SearchResult**: Kết quả tìm kiếm từ vector DB
+   - Chứa document, score similarity, metadata
+
+5. **ChatResponse**: Câu trả lời cuối cùng gửi về client
+   - Bao gồm answer, sources, confidence score
+
+6. **Conversation & Message**: Lưu lịch sử hội thoại
+   - `getContext()`: Lấy n tin nhắn gần nhất làm context
+
+---
+
+## 4. THIẾT KẾ CHI TIẾT CÁC CHỨC NĂNG
+
+---
+
+## CHỨC NĂNG 1: RAG QUERY PROCESSING
+
+### 4.1.1. Mô tả
+Xử lý câu hỏi từ user, tìm kiếm thông tin liên quan, tổng hợp context và sinh câu trả lời.
+
+### 4.1.2. Thiết kế giao diện API
+
+#### Endpoint: `POST /api/v1/chat/query`
+
+**Request:**
+```json
+{
+    "query": "Học phí ngành CNTT năm 2025 là bao nhiêu?",
+    "user_id": "user_123",
+    "conversation_id": "conv_456", // optional
+    "options": {
+        "top_k": 5,
+        "temperature": 0.7,
+        "use_cache": true
+    }
+}
+```
+
+**Response:**
+```json
+{
+    "success": true,
+    "data": {
+        "answer": "Học phí ngành Công nghệ Thông tin năm 2025 là 12.000.000 VNĐ/năm theo quy định tại Quyết định số...",
+        "conversation_id": "conv_456",
+        "sources": [
+            {
+                "doc_id": "doc_tuyen_sinh_2025_p3",
+                "content": "Học phí các ngành năm 2025: CNTT: 12tr...",
+                "score": 0.89,
+                "metadata": {
+                    "source": "tuyen_sinh_2025.pdf",
+                    "category": "hoc_phi"
+                }
+            }
+        ],
+        "confidence": 0.92,
+        "response_time_ms": 450
+    }
+}
+```
+
+### 4.1.3. Biểu đồ lớp chi tiết
 
 ```mermaid
-activity
-  start
-  :User enters search query;
-  :System receives query;
+classDiagram
+    class RAGQueryHandler {
+        -VectorStore vectorStore
+        -EmbeddingService embeddingService
+        -LLMService llmService
+        -CacheService cacheService
+        -ContextBuilder contextBuilder
+        +processQuery(Query) ChatResponse
+        -retrieveDocuments(Query, int) List~SearchResult~
+        -buildContext(Query, List~SearchResult~) str
+        -generateAnswer(str, str) str
+        -checkCache(Query) ChatResponse
+        -saveCache(Query, ChatResponse) void
+    }
 
-  if (Query is empty?) then (yes)
-    :Show error message;
-    stop
-  else (no)
-    :Refine query using LLM;
-  endif
+    class VectorStore {
+        -ChromaClient client
+        -String collectionName
+        +search(embedding, topK) List~SearchResult~
+        +addDocuments(List~Document~) void
+        +deleteDocument(docId) bool
+        +getCollection() Collection
+    }
 
-  :Convert query to embedding vector;
-  :Search in vector database;
+    class EmbeddingService {
+        -Model embeddingModel
+        +embed(text) List~float~
+        +batchEmbed(List~str~) List~List~float~~
+    }
 
-  fork
-    :Calculate L2 distance;
-  fork again
-    :Apply metadata filters;
-  fork again
-    :Sort by relevance score;
-  end fork
+    class LLMService {
+        -String apiKey
+        -String modelName
+        -float temperature
+        +generate(prompt, context) str
+        +streamGenerate(prompt, context) Iterator~str~
+    }
 
-  :Retrieve top K results;
+    class ContextBuilder {
+        -int maxTokens
+        -String template
+        +build(Query, List~SearchResult~) str
+        -rankResults(List~SearchResult~) List~SearchResult~
+        -truncateContext(str) str
+    }
 
-  if (Results above threshold?) then (yes)
-    :Format and return results;
-  else (no)
-    :Return empty result with message;
-  endif
+    class CacheService {
+        -RedisClient redis
+        -int ttl
+        +get(queryHash) ChatResponse
+        +set(queryHash, ChatResponse) void
+        +invalidate(pattern) void
+    }
 
-  :Display results to user;
-  stop
+    RAGQueryHandler --> VectorStore
+    RAGQueryHandler --> EmbeddingService
+    RAGQueryHandler --> LLMService
+    RAGQueryHandler --> CacheService
+    RAGQueryHandler --> ContextBuilder
 ```
 
-#### 2.3.4. Biểu đồ tuần tự
+**Giải thích các lớp và phương thức:**
+
+1. **RAGQueryHandler** (Main controller)
+   - `processQuery()`: Workflow chính xử lý query
+   - `retrieveDocuments()`: Tìm kiếm documents liên quan từ vector DB
+   - `buildContext()`: Xây dựng context prompt từ query + documents
+   - `generateAnswer()`: Gọi LLM để sinh câu trả lời
+   - `checkCache()`/`saveCache()`: Tối ưu với cache
+
+2. **VectorStore** (Vector DB interface)
+   - `search()`: Semantic search dựa trên embedding similarity
+   - `addDocuments()`: Thêm documents mới (sync từ Server 1)
+
+3. **EmbeddingService** (Embedding generator)
+   - `embed()`: Chuyển text thành vector
+   - `batchEmbed()`: Xử lý nhiều text cùng lúc (hiệu quả hơn)
+
+4. **LLMService** (LLM API wrapper)
+   - `generate()`: Sinh câu trả lời từ prompt
+   - `streamGenerate()`: Streaming response (real-time chat)
+
+5. **ContextBuilder** (Context engineering)
+   - `build()`: Tạo prompt với format chuẩn
+   - `rankResults()`: Re-rank kết quả tìm kiếm (cross-encoder optional)
+   - `truncateContext()`: Cắt ngắn context nếu vượt token limit
+
+6. **CacheService** (Cache manager)
+   - Lưu kết quả query phổ biến để giảm latency & cost
+
+### 4.1.4. Biểu đồ hoạt động (Activity Diagram)
+
+```mermaid
+flowchart TD
+    Start([Nhận query từ Client]) --> CheckCache{Có trong cache?}
+    CheckCache -->|Có| ReturnCache[Trả về kết quả cache]
+    ReturnCache --> End([Kết thúc])
+
+    CheckCache -->|Không| Embed[Embedding query thành vector]
+    Embed --> Search[Vector similarity search<br/>top_k documents]
+    Search --> HasResults{Tìm thấy<br/>documents?}
+
+    HasResults -->|Không| Fallback[Trả về câu trả lời mặc định:<br/>"Xin lỗi, tôi không tìm thấy..."]
+    Fallback --> End
+
+    HasResults -->|Có| Rank[Re-rank kết quả<br/>theo relevance]
+    Rank --> BuildContext[Xây dựng context prompt:<br/>Query + Top documents]
+    BuildContext --> CheckTokens{Context vượt<br/>token limit?}
+
+    CheckTokens -->|Có| Truncate[Cắt bớt documents<br/>ưu tiên score cao]
+    Truncate --> Generate
+    CheckTokens -->|Không| Generate[Gọi LLM generate answer]
+
+    Generate --> ParseResponse[Parse response +<br/>extract sources]
+    ParseResponse --> SaveCache[Lưu vào cache]
+    SaveCache --> LogMetrics[Log metrics:<br/>latency, confidence]
+    LogMetrics --> Return[Trả về ChatResponse]
+    Return --> End
+```
+
+### 4.1.5. Biểu đồ tuần tự (Sequence Diagram)
 
 ```mermaid
 sequenceDiagram
-    participant User
-    participant UI
-    participant SearchController
-    participant QueryRefiner
-    participant Embedder
-    participant VectorDB as Chroma
-    participant ResponseFormatter
+    participant C as Client 2<br/>(Customer UI)
+    participant API as RAGQueryHandler
+    participant Cache as CacheService
+    participant Embed as EmbeddingService
+    participant VDB as VectorStore<br/>(ChromaDB)
+    participant CTX as ContextBuilder
+    participant LLM as LLMService
 
-    User->>UI: Enter search query
-    UI->>SearchController: search_request(query, k, threshold)
+    C->>API: POST /chat/query<br/>{query, user_id}
 
-    SearchController->>QueryRefiner: refine_query(query)
-    QueryRefiner-->>SearchController: refined_query
+    API->>Cache: get(query_hash)
+    alt Cache hit
+        Cache-->>API: ChatResponse (cached)
+        API-->>C: 200 OK {answer, sources}
+    else Cache miss
+        API->>Embed: embed(query_text)
+        Embed-->>API: query_embedding [768d vector]
 
-    SearchController->>Embedder: embed_query(refined_query)
-    Embedder-->>SearchController: query_embedding
+        API->>VDB: search(embedding, top_k=5)
+        VDB-->>API: List<SearchResult> [5 docs]
 
-    SearchController->>VectorDB: similarity_search_with_threshold(embedding, k, threshold)
+        alt No results found
+            API-->>C: 200 OK {default_answer}
+        else Results found
+            API->>CTX: build(query, search_results)
+            CTX->>CTX: rank & truncate if needed
+            CTX-->>API: formatted_prompt
 
-    VectorDB->>VectorDB: __query_collection()
-    VectorDB->>VectorDB: calculate_distances()
-    VectorDB->>VectorDB: apply_threshold_filter()
-    VectorDB->>VectorDB: sort_by_relevance()
+            API->>LLM: generate(prompt, context)
+            LLM-->>API: answer_text
 
-    VectorDB-->>SearchController: List<Document, score>
+            API->>API: create ChatResponse
+            API->>Cache: set(query_hash, response)
+            Cache-->>API: OK
 
-    SearchController->>ResponseFormatter: format_results(documents)
-    ResponseFormatter-->>SearchController: formatted_response
-
-    SearchController-->>UI: search_results
-    UI-->>User: Display results
+            API-->>C: 200 OK {answer, sources, confidence}
+        end
+    end
 ```
 
-### 2.4. Chức năng 2: Document Processing và Indexing
+---
 
-#### 2.4.1. Thiết kế giao diện
+## CHỨC NĂNG 2: VECTOR DATABASE MANAGEMENT
 
-```
-┌─────────────────────────────────────────────┐
-│         DOCUMENT PROCESSING INTERFACE        │
-├─────────────────────────────────────────────┤
-│                                              │
-│  Upload Documents:                          │
-│  ┌────────────────────────────────────────┐ │
-│  │ 📁 Drop files here or click to browse  │ │
-│  │                                         │ │
-│  │  Supported: PDF, MD, TXT, DOCX         │ │
-│  └────────────────────────────────────────┘ │
-│                                              │
-│  Processing Options:                        │
-│  ├─ Chunk Size: [1000 ▼]                   │
-│  ├─ Chunk Overlap: [200 ▼]                 │
-│  └─ Split Method: [Recursive ▼]            │
-│                                              │
-│  Documents Queue:                           │
-│  ┌────────────────────────────────────────┐ │
-│  │ ✅ student_handbook.pdf (342 chunks)   │ │
-│  │ ⏳ admission_guide.pdf (Processing...) │ │
-│  │ ⏸️ curriculum.docx (Queued)           │ │
-│  └────────────────────────────────────────┘ │
-│                                              │
-│  [Process All] [Pause] [Clear Queue]        │
-│                                              │
-└─────────────────────────────────────────────┘
+### 4.2.1. Mô tả
+Quản lý việc đồng bộ documents từ Server 1, embedding, và index vào vector database.
+
+### 4.2.2. Thiết kế giao diện API
+
+#### Endpoint 1: `POST /api/v1/vector/sync`
+Đồng bộ documents mới từ Server 1
+
+**Request:**
+```json
+{
+    "source": "server1_model_update",
+    "documents": [
+        {
+            "id": "doc_new_001",
+            "content": "Nội dung tài liệu mới...",
+            "metadata": {
+                "source": "tuyen_sinh_2026.pdf",
+                "category": "tuyen_sinh",
+                "version": "v2.0"
+            }
+        }
+    ],
+    "operation": "upsert" // "upsert" | "delete" | "replace_all"
+}
 ```
 
-#### 2.4.2. Thiết kế lớp chi tiết
+**Response:**
+```json
+{
+    "success": true,
+    "data": {
+        "synced_count": 145,
+        "failed_count": 0,
+        "total_vectors": 10245,
+        "sync_time_ms": 3200
+    }
+}
+```
+
+#### Endpoint 2: `GET /api/v1/vector/stats`
+Thống kê vector database
+
+**Response:**
+```json
+{
+    "success": true,
+    "data": {
+        "total_documents": 10245,
+        "collections": [
+            {
+                "name": "ptit_knowledge_base",
+                "count": 10245,
+                "dimensions": 768,
+                "categories": {
+                    "tuyen_sinh": 3420,
+                    "hoc_phi": 1250,
+                    "chuong_trinh_dao_tao": 5575
+                }
+            }
+        ],
+        "last_update": "2025-01-15T14:30:00Z"
+    }
+}
+```
+
+### 4.2.3. Biểu đồ lớp chi tiết
 
 ```mermaid
 classDiagram
-    class DocumentLoader {
-        -str docs_path
-        -List~str~ supported_formats
-        +load_documents(file_paths)
-        +load_pdf(file_path)
-        +load_markdown(file_path)
-        +load_text(file_path)
-        +extract_metadata(file_path)
-    }
-
-    class TextSplitter {
-        -int chunk_size
-        -int chunk_overlap
-        -str split_method
-        +split_documents(documents)
-        +recursive_split(text, separators)
-        +merge_splits(splits, separator)
-        +calculate_chunk_metadata(chunk, document)
+    class VectorSyncManager {
+        -VectorStore vectorStore
+        -EmbeddingService embeddingService
+        -DocumentProcessor docProcessor
+        -SyncQueue syncQueue
+        +syncDocuments(List~Document~, operation) SyncResult
+        +deleteDocuments(List~docId~) bool
+        +rebuildIndex() void
+        -processDocument(Document) ProcessedDocument
+        -batchUpsert(List~ProcessedDocument~) void
     }
 
     class DocumentProcessor {
-        -DocumentLoader loader
-        -TextSplitter splitter
-        -Embedder embedder
-        -Chroma vector_store
-        +process_documents(file_paths)
-        +process_single_document(file_path)
-        +create_chunks(document)
-        +generate_embeddings(chunks)
-        +store_in_vectordb(chunks_with_embeddings)
+        -Chunker chunker
+        -int chunkSize
+        -int chunkOverlap
+        +process(Document) List~DocumentChunk~
+        +cleanText(str) str
+        +extractMetadata(Document) DocumentMetadata
     }
 
-    class ProcessingQueue {
-        -Queue~Document~ queue
-        -bool is_processing
-        -int batch_size
-        +add_to_queue(documents)
-        +process_queue()
-        +pause_processing()
-        +clear_queue()
-        +get_queue_status()
+    class Chunker {
+        -int maxTokens
+        -String strategy
+        +chunkBySentence(text) List~str~
+        +chunkByTokens(text) List~str~
+        +chunkSemantic(text) List~str~
     }
 
-    DocumentProcessor --> DocumentLoader : uses
-    DocumentProcessor --> TextSplitter : uses
-    DocumentProcessor --> Embedder : uses
-    DocumentProcessor --> Chroma : stores in
-    ProcessingQueue --> DocumentProcessor : manages
+    class SyncQueue {
+        -Queue queue
+        -int batchSize
+        +enqueue(Document) void
+        +processBatch() void
+        +getStatus() QueueStatus
+    }
+
+    class VectorStoreIndex {
+        -String indexType
+        -Map parameters
+        +build(List~embedding~) void
+        +optimize() void
+        +getStats() IndexStats
+    }
+
+    VectorSyncManager --> VectorStore
+    VectorSyncManager --> EmbeddingService
+    VectorSyncManager --> DocumentProcessor
+    VectorSyncManager --> SyncQueue
+    DocumentProcessor --> Chunker
+    VectorStore --> VectorStoreIndex
 ```
 
-**Giải thích thiết kế:**
-- **DocumentLoader**: Đọc và chuyển đổi các định dạng tài liệu khác nhau
-- **TextSplitter**: Chia tài liệu thành các chunks với kích thước phù hợp
-- **DocumentProcessor**: Điều phối toàn bộ quá trình xử lý tài liệu
-- **ProcessingQueue**: Quản lý hàng đợi xử lý tài liệu
+**Giải thích:**
 
-#### 2.4.3. Biểu đồ hoạt động
+1. **VectorSyncManager** (Sync orchestrator)
+   - `syncDocuments()`: Đồng bộ batch documents
+   - `rebuildIndex()`: Rebuild toàn bộ index khi cần thiết
+   - `batchUpsert()`: Upsert theo batch để tối ưu performance
+
+2. **DocumentProcessor** (Document preprocessing)
+   - `process()`: Pipeline xử lý document (clean → chunk → metadata)
+   - `cleanText()`: Loại bỏ ký tự đặc biệt, normalize text
+   - `extractMetadata()`: Tự động extract metadata từ document
+
+3. **Chunker** (Chunking strategies)
+   - `chunkBySentence()`: Chia theo câu (preserves context)
+   - `chunkByTokens()`: Chia theo số tokens cố định
+   - `chunkSemantic()`: Chia theo ngữ nghĩa (advanced)
+
+4. **SyncQueue** (Async processing queue)
+   - Xử lý đồng bộ bất đồng bộ để không block API
+   - Batch processing để tối ưu embedding cost
+
+5. **VectorStoreIndex** (Index management)
+   - Quản lý HNSW/IVF index parameters
+   - Optimize index định kỳ
+
+### 4.2.4. Biểu đồ hoạt động
 
 ```mermaid
-activity
-  start
-  :Admin uploads documents;
+flowchart TD
+    Start([Nhận sync request từ Server 1]) --> ValidateData{Validate<br/>documents?}
+    ValidateData -->|Invalid| ReturnError[Trả về lỗi validation]
+    ReturnError --> End([Kết thúc])
 
-  if (Valid file format?) then (no)
-    :Show error message;
-    stop
-  else (yes)
-    :Add to processing queue;
-  endif
+    ValidateData -->|Valid| CheckOp{Operation type?}
 
-  while (Documents in queue?) is (yes)
-    :Get next document;
-    :Load document content;
+    CheckOp -->|delete| DeleteDocs[Xóa documents theo IDs]
+    DeleteDocs --> UpdateStats[Cập nhật statistics]
+    UpdateStats --> End
 
-    switch (Document type?)
-    case (PDF)
-      :Extract PDF text;
-    case (Markdown)
-      :Parse markdown;
-    case (Text)
-      :Read plain text;
-    endswitch
+    CheckOp -->|upsert/replace| ProcessDocs[Process documents:<br/>Clean + Chunk]
+    ProcessDocs --> BatchEmbed[Batch embedding<br/>all chunks]
+    BatchEmbed --> CheckExisting{Documents<br/>đã tồn tại?}
 
-    :Split into chunks;
-    :Generate embeddings for chunks;
-    :Store in vector database;
-    :Update processing status;
-  endwhile (no)
+    CheckExisting -->|Có| UpdateVectors[Update existing vectors]
+    CheckExisting -->|Không| InsertVectors[Insert new vectors]
 
-  :Show completion message;
-  stop
+    UpdateVectors --> CheckIndexSize{Index size > threshold?}
+    InsertVectors --> CheckIndexSize
+
+    CheckIndexSize -->|Có| OptimizeIndex[Optimize index:<br/>rebuild HNSW]
+    CheckIndexSize -->|Không| UpdateStats2[Cập nhật statistics]
+
+    OptimizeIndex --> UpdateStats2
+    UpdateStats2 --> NotifySuccess[Notify success + metrics]
+    NotifySuccess --> End
 ```
 
-#### 2.4.4. Biểu đồ tuần tự
+### 4.2.5. Biểu đồ tuần tự
 
 ```mermaid
 sequenceDiagram
-    participant Admin
-    participant UI
-    participant ProcessingController
-    participant DocumentLoader
-    participant TextSplitter
-    participant Embedder
-    participant VectorStore as Chroma
-    participant Queue
+    participant S1 as Server 1<br/>(Training Module)
+    participant API as VectorSyncManager
+    participant DP as DocumentProcessor
+    participant Embed as EmbeddingService
+    participant VDB as VectorStore
+    participant Queue as SyncQueue
 
-    Admin->>UI: Upload documents
-    UI->>ProcessingController: process_documents(files)
+    S1->>API: POST /vector/sync<br/>{documents[], operation}
 
-    ProcessingController->>Queue: add_to_queue(files)
-    Queue-->>ProcessingController: queue_id
+    API->>API: validate_request()
+    alt Invalid data
+        API-->>S1: 400 Bad Request
+    else Valid data
+        loop For each document
+            API->>DP: process(document)
+            DP->>DP: cleanText()
+            DP->>DP: chunkDocument()
+            DP-->>API: List<DocumentChunk>
+        end
 
-    loop For each document in queue
-        ProcessingController->>Queue: get_next_document()
-        Queue-->>ProcessingController: document
+        API->>Queue: enqueue(processed_docs)
+        Queue->>Queue: wait for batch_size
 
-        ProcessingController->>DocumentLoader: load_document(document)
-        DocumentLoader-->>ProcessingController: document_content
+        Queue->>Embed: batchEmbed(chunks)
+        Embed-->>Queue: embeddings[]
 
-        ProcessingController->>TextSplitter: split_document(content, chunk_size)
-        TextSplitter-->>ProcessingController: chunks[]
+        Queue->>VDB: upsert(doc_id, embedding, metadata)
+        VDB->>VDB: HNSW index update
+        VDB-->>Queue: upsert success
 
-        ProcessingController->>Embedder: embed_documents(chunks)
-        Embedder-->>ProcessingController: embeddings[]
+        Queue->>VDB: getStats()
+        VDB-->>Queue: IndexStats
 
-        ProcessingController->>VectorStore: add_texts(chunks, embeddings, metadata)
-        VectorStore-->>ProcessingController: stored_ids[]
+        alt Index size > threshold
+            Queue->>VDB: optimizeIndex()
+            VDB-->>Queue: optimization done
+        end
 
-        ProcessingController->>UI: update_progress(document_id, status)
+        Queue-->>API: SyncResult
+        API-->>S1: 200 OK {synced_count, stats}
     end
-
-    ProcessingController-->>UI: processing_complete
-    UI-->>Admin: Display completion status
 ```
 
 ---
 
-## PHẦN 3: THIẾT KẾ CHI TIẾT - BẠN THỨ HAI
+## CHỨC NĂNG 3: CONTEXT SYNTHESIS & RERANKING
 
-**Họ tên:** Trần Thị B
-**Mã SV:** B21DCCN002
-**Phụ trách:** Module Chat Interface và Conversation Management
+### 4.3.1. Mô tả
+Tổng hợp context thông minh từ nhiều sources, re-rank kết quả để tăng độ chính xác.
 
-### 3.1. Thiết kế CSDL liên quan module
-
-#### 3.1.1. Schema Conversation Management
-
-```sql
-CREATE TABLE conversations (
-    conversation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id UUID NOT NULL,
-    user_id VARCHAR(255),
-    title VARCHAR(500),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    is_active BOOLEAN DEFAULT true
-);
-
-CREATE TABLE conversation_turns (
-    turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    conversation_id UUID REFERENCES conversations(conversation_id),
-    user_message TEXT NOT NULL,
-    assistant_response TEXT NOT NULL,
-    context_used TEXT[],
-    response_time_ms INTEGER,
-    tokens_used INTEGER,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE conversation_feedback (
-    feedback_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    turn_id UUID REFERENCES conversation_turns(turn_id),
-    rating INTEGER CHECK (rating >= 1 AND rating <= 5),
-    feedback_text TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-### 3.2. Thiết kế lớp thực thể
+### 4.3.2. Thiết kế giao diện (Internal Service)
 
 ```python
-@dataclass
-class Conversation:
-    """Entity representing a conversation session"""
-    conversation_id: str
-    session_id: str
-    user_id: Optional[str]
-    title: str
-    created_at: datetime
-    updated_at: datetime
-    is_active: bool = True
-    turns: List['ConversationTurn'] = field(default_factory=list)
-
-@dataclass
-class ConversationTurn:
-    """Entity representing a single turn in conversation"""
-    turn_id: str
-    conversation_id: str
-    user_message: str
-    assistant_response: str
-    context_used: List[str]
-    response_time_ms: int
-    tokens_used: int
-    created_at: datetime
+# Internal interface - không expose API ra ngoài
+class ContextSynthesizer:
+    def synthesize(
+        self,
+        query: Query,
+        search_results: List[SearchResult],
+        conversation_history: List[Message] = None
+    ) -> SynthesizedContext:
+        pass
 ```
 
-### 3.3. Chức năng 1: Real-time Chat với WebSocket
-
-#### 3.3.1. Thiết kế giao diện
-
-```
-┌─────────────────────────────────────────────┐
-│           PTIT CHATBOT ASSISTANT            │
-├─────────────────────────────────────────────┤
-│ 💬 Conversations     │   Chat Window        │
-│ ┌──────────────┐    │  ┌─────────────────┐ │
-│ │ ▶ Tuyển sinh │    │  │ 🤖 Assistant:   │ │
-│ │   Học phí    │    │  │ Xin chào! Tôi   │ │
-│ │   Chương trình│   │  │ có thể giúp gì  │ │
-│ └──────────────┘    │  │ cho bạn?        │ │
-│                      │  └─────────────────┘ │
-│ [+ New Chat]        │  ┌─────────────────┐ │
-│                      │  │ 👤 You:         │ │
-│                      │  │ Điều kiện xét   │ │
-│                      │  │ tuyển là gì?    │ │
-│                      │  └─────────────────┘ │
-│                      │  ┌─────────────────┐ │
-│                      │  │ 🤖 Đang trả lời.│ │
-│                      │  │ ▌               │ │
-│                      │  └─────────────────┘ │
-│                      │                      │
-│                      │ ┌──────────────────┐ │
-│                      │ │Type message...   │ │
-│                      │ │                  │ │
-│                      │ └──────────────────┘ │
-│                      │ [📎] [🎤] [Send]    │
-└─────────────────────────────────────────────┘
-```
-
-#### 3.3.2. Thiết kế lớp chi tiết
+### 4.3.3. Biểu đồ lớp chi tiết
 
 ```mermaid
 classDiagram
-    class ConversationHandler {
-        -LamaCppClient llm
-        -ChatHistory chat_history
-        -ContextStrategy context_strategy
-        +handle_user_message(message, session_id)
-        +refine_question(question, history)
-        +generate_response(question, context)
-        +stream_response(response_generator)
-        +save_conversation_turn(turn)
+    class ContextSynthesizer {
+        -RerankerService reranker
+        -PromptTemplate template
+        -int maxContextTokens
+        -ConversationManager convManager
+        +synthesize(Query, List~SearchResult~, history) SynthesizedContext
+        -rerank(Query, List~SearchResult~) List~SearchResult~
+        -mergeConversationContext(List~Message~) str
+        -truncateToTokenLimit(str) str
     }
 
-    class ChatHistory {
-        -int total_length
-        -List~Message~ messages
-        +append(message)
-        +clear()
-        +get_recent_messages(n)
-        +to_prompt_format()
-        +get_context_window()
-    }
-
-    class WebSocketManager {
-        -Dict active_connections
-        +connect(websocket, session_id)
-        +disconnect(session_id)
-        +send_message(session_id, message)
-        +broadcast(message)
-        +handle_incoming_message(session_id, message)
-    }
-
-    class StreamingResponse {
-        -Generator token_generator
-        -str buffer
-        -bool is_complete
-        +get_next_token()
-        +flush_buffer()
-        +mark_complete()
-    }
-
-    class SessionManager {
-        -Dict sessions
-        +create_session(user_id)
-        +get_session(session_id)
-        +update_session(session_id, data)
-        +cleanup_inactive_sessions()
-    }
-
-    ConversationHandler --> ChatHistory : uses
-    ConversationHandler --> StreamingResponse : generates
-    WebSocketManager --> ConversationHandler : calls
-    WebSocketManager --> SessionManager : manages
-```
-
-**Giải thích thiết kế:**
-- **ConversationHandler**: Xử lý logic chính của cuộc hội thoại
-- **ChatHistory**: Quản lý lịch sử chat và context window
-- **WebSocketManager**: Quản lý kết nối WebSocket real-time
-- **StreamingResponse**: Xử lý streaming response từ LLM
-- **SessionManager**: Quản lý các phiên làm việc của người dùng
-
-#### 3.3.3. Biểu đồ hoạt động
-
-```mermaid
-activity
-  start
-  :User connects to chat;
-  :Create/restore session;
-  :Initialize WebSocket connection;
-
-  while (Session active?) is (yes)
-    :Wait for user message;
-
-    if (Message received?) then (yes)
-      :Add to chat history;
-      :Refine question with context;
-      :Retrieve relevant documents;
-
-      fork
-        :Generate response stream;
-      fork again
-        :Send tokens to client;
-      fork again
-        :Update UI progressively;
-      end fork
-
-      :Save conversation turn;
-      :Update chat history;
-    else (no)
-      :Check connection status;
-    endif
-
-    if (User disconnects?) then (yes)
-      :Save session state;
-      :Close WebSocket;
-      stop
-    endif
-  endwhile (no)
-
-  stop
-```
-
-#### 3.3.4. Biểu đồ tuần tự
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant WebUI
-    participant WebSocket
-    participant ConversationHandler
-    participant ChatHistory
-    participant VectorDB
-    participant LLM
-    participant StreamManager
-
-    User->>WebUI: Open chat interface
-    WebUI->>WebSocket: establish_connection()
-    WebSocket->>ConversationHandler: create_session()
-    ConversationHandler->>ChatHistory: initialize()
-    ConversationHandler-->>WebSocket: session_id
-    WebSocket-->>WebUI: connection_established
-
-    User->>WebUI: Type message
-    WebUI->>WebSocket: send_message(text)
-    WebSocket->>ConversationHandler: handle_message(text, session_id)
-
-    ConversationHandler->>ChatHistory: add_user_message(text)
-    ConversationHandler->>ConversationHandler: refine_question(text, history)
-
-    ConversationHandler->>VectorDB: similarity_search(refined_question)
-    VectorDB-->>ConversationHandler: relevant_documents[]
-
-    ConversationHandler->>LLM: generate_response(question, context)
-    LLM->>StreamManager: create_token_stream()
-
-    loop Streaming tokens
-        StreamManager->>LLM: get_next_token()
-        LLM-->>StreamManager: token
-        StreamManager->>WebSocket: send_token(token)
-        WebSocket->>WebUI: update_response(token)
-        WebUI->>User: Display streaming text
-    end
-
-    ConversationHandler->>ChatHistory: add_assistant_message(response)
-    ConversationHandler-->>WebSocket: response_complete
-    WebSocket-->>WebUI: finalize_response
-```
-
-### 3.4. Chức năng 2: Context-Aware Response Generation
-
-#### 3.4.1. Thiết kế giao diện
-
-```
-┌─────────────────────────────────────────────┐
-│       CONTEXT & RESPONSE GENERATION          │
-├─────────────────────────────────────────────┤
-│                                              │
-│  Current Context Window:                    │
-│  ┌────────────────────────────────────────┐ │
-│  │ 📊 Context Usage: 2048/4096 tokens     │ │
-│  │ ├─ System Prompt: 150 tokens          │ │
-│  │ ├─ Chat History: 500 tokens           │ │
-│  │ └─ Retrieved Docs: 1398 tokens        │ │
-│  └────────────────────────────────────────┘ │
-│                                              │
-│  Response Strategy: [Tree Summarization ▼]  │
-│                                              │
-│  Retrieved Context:                         │
-│  ┌────────────────────────────────────────┐ │
-│  │ 1. 📄 Quy chế tuyển sinh (Score: 0.95) │ │
-│  │    "Điểm xét tuyển = Điểm thi THPT..." │ │
-│  ├────────────────────────────────────────┤ │
-│  │ 2. 📄 Hướng dẫn nhập học (Score: 0.88) │ │
-│  │    "Thí sinh trúng tuyển cần nộp..."   │ │
-│  └────────────────────────────────────────┘ │
-│                                              │
-│  Response Generation:                       │
-│  ┌────────────────────────────────────────┐ │
-│  │ ⚡ Generating response...               │ │
-│  │ Progress: ████████░░ 80%               │ │
-│  └────────────────────────────────────────┘ │
-│                                              │
-└─────────────────────────────────────────────┘
-```
-
-#### 3.4.2. Thiết kế lớp chi tiết
-
-```mermaid
-classDiagram
-    class BaseSynthesisStrategy {
-        <<abstract>>
-        -LamaCppClient llm
-        +synthesize_response(question, contexts)*
-        +get_strategy_name()*
-    }
-
-    class CreateAndRefineStrategy {
-        +synthesize_response(question, contexts)
-        +create_initial_answer(question, context)
-        +refine_answer(answer, new_context)
-        +get_strategy_name()
-    }
-
-    class TreeSummarizationStrategy {
-        -int max_children
-        +synthesize_response(question, contexts)
-        +build_tree(contexts)
-        +summarize_node(node_contexts)
-        +merge_summaries(summaries)
-        +get_strategy_name()
-    }
-
-    class AsyncTreeSummarizationStrategy {
-        -ThreadPoolExecutor executor
-        +synthesize_response(question, contexts)
-        +async_summarize_chunks(chunks)
-        +wait_for_completion(futures)
-        +get_strategy_name()
-    }
-
-    class ContextWindowManager {
-        -int max_tokens
-        -int current_usage
-        +calculate_tokens(text)
-        +can_fit(text)
-        +optimize_context(contexts)
-        +get_remaining_tokens()
+    class RerankerService {
+        -Model crossEncoder
+        -float threshold
+        +rerank(query, documents) List~ScoredDocument~
+        +scoreRelevance(query, document) float
     }
 
     class PromptTemplate {
-        -str system_prompt
-        -str user_prompt_template
-        +format_prompt(question, context)
-        +get_refine_prompt(answer, context)
-        +get_summarize_prompt(contexts)
+        -String systemPrompt
+        -String userPromptTemplate
+        -String fewShotExamples
+        +format(Query, context, history) str
+        +addFewShot(example) void
     }
 
-    BaseSynthesisStrategy <|-- CreateAndRefineStrategy
-    BaseSynthesisStrategy <|-- TreeSummarizationStrategy
-    BaseSynthesisStrategy <|-- AsyncTreeSummarizationStrategy
-
-    BaseSynthesisStrategy --> ContextWindowManager : uses
-    BaseSynthesisStrategy --> PromptTemplate : uses
-```
-
-**Giải thích thiết kế:**
-- **BaseSynthesisStrategy**: Abstract class định nghĩa interface cho các strategy
-- **CreateAndRefineStrategy**: Tạo câu trả lời ban đầu và tinh chỉnh dần
-- **TreeSummarizationStrategy**: Tổng hợp theo cấu trúc cây
-- **AsyncTreeSummarizationStrategy**: Tổng hợp song song để tăng tốc độ
-- **ContextWindowManager**: Quản lý và tối ưu context window
-- **PromptTemplate**: Quản lý các template prompt
-
-#### 3.4.3. Biểu đồ hoạt động
-
-```mermaid
-activity
-  start
-  :Receive question and contexts;
-
-  :Calculate total tokens;
-  if (Exceeds context window?) then (yes)
-    :Select synthesis strategy;
-
-    switch (Strategy type?)
-    case (Create & Refine)
-      :Create initial answer;
-      while (More contexts?) is (yes)
-        :Refine with next context;
-      endwhile (no)
-    case (Tree Summarization)
-      :Build context tree;
-      :Summarize leaf nodes;
-      :Merge summaries hierarchically;
-    case (Async Tree)
-      fork
-        :Summarize chunk 1;
-      fork again
-        :Summarize chunk 2;
-      fork again
-        :Summarize chunk N;
-      end fork
-      :Merge all summaries;
-    endswitch
-  else (no)
-    :Generate direct response;
-  endif
-
-  :Format final answer;
-  :Return response;
-  stop
-```
-
-#### 3.4.4. Biểu đồ tuần tự
-
-```mermaid
-sequenceDiagram
-    participant Handler as ConversationHandler
-    participant Strategy as SynthesisStrategy
-    participant ContextMgr as ContextWindowManager
-    participant Template as PromptTemplate
-    participant LLM
-    participant AsyncExecutor
-
-    Handler->>Strategy: synthesize_response(question, contexts)
-    Strategy->>ContextMgr: calculate_tokens(contexts)
-    ContextMgr-->>Strategy: total_tokens
-
-    alt Total tokens > max_window
-        Strategy->>ContextMgr: optimize_context(contexts)
-        ContextMgr-->>Strategy: optimized_contexts[]
-
-        alt Async Tree Strategy
-            Strategy->>AsyncExecutor: create_thread_pool()
-
-            par Parallel Processing
-                AsyncExecutor->>LLM: summarize(context_1)
-                and
-                AsyncExecutor->>LLM: summarize(context_2)
-                and
-                AsyncExecutor->>LLM: summarize(context_n)
-            end
-
-            AsyncExecutor-->>Strategy: summaries[]
-            Strategy->>Template: get_merge_prompt(summaries)
-            Template-->>Strategy: merge_prompt
-            Strategy->>LLM: generate_final_answer(merge_prompt)
-
-        else Create & Refine Strategy
-            Strategy->>Template: format_prompt(question, first_context)
-            Template-->>Strategy: initial_prompt
-            Strategy->>LLM: generate(initial_prompt)
-            LLM-->>Strategy: initial_answer
-
-            loop For remaining contexts
-                Strategy->>Template: get_refine_prompt(answer, next_context)
-                Template-->>Strategy: refine_prompt
-                Strategy->>LLM: generate(refine_prompt)
-                LLM-->>Strategy: refined_answer
-            end
-        end
-    else Total tokens <= max_window
-        Strategy->>Template: format_prompt(question, all_contexts)
-        Template-->>Strategy: prompt
-        Strategy->>LLM: generate(prompt)
-    end
-
-    LLM-->>Strategy: final_response
-    Strategy-->>Handler: response
-```
-
----
-
-## PHẦN 4: THIẾT KẾ CHI TIẾT - BẠN THỨ BA
-
-**Họ tên:** Lê Văn C
-**Mã SV:** B21DCCN003
-**Phụ trách:** Module LLM Management và Admin Interface
-
-### 4.1. Thiết kế CSDL liên quan module
-
-#### 4.1.1. Schema Model Management
-
-```sql
-CREATE TABLE llm_models (
-    model_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    model_name VARCHAR(255) NOT NULL UNIQUE,
-    model_type VARCHAR(100), -- 'llama', 'qwen', 'openchat', etc.
-    model_size VARCHAR(50), -- '7B', '13B', '70B'
-    file_path TEXT NOT NULL,
-    quantization VARCHAR(50), -- 'Q4_K_M', 'Q5_K_M', etc.
-    context_window INTEGER,
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE model_settings (
-    setting_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    model_id UUID REFERENCES llm_models(model_id),
-    parameter_name VARCHAR(255),
-    parameter_value TEXT,
-    parameter_type VARCHAR(50) -- 'float', 'int', 'string', 'boolean'
-);
-
-CREATE TABLE admin_users (
-    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    username VARCHAR(255) UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    role VARCHAR(50), -- 'super_admin', 'content_admin', 'viewer'
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_login TIMESTAMP
-);
-
-CREATE TABLE admin_logs (
-    log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES admin_users(user_id),
-    action VARCHAR(255),
-    target_type VARCHAR(100), -- 'model', 'document', 'setting'
-    target_id VARCHAR(255),
-    details JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-### 4.2. Thiết kế lớp thực thể
-
-```python
-@dataclass
-class LLMModel:
-    """Entity representing an LLM model"""
-    model_id: str
-    model_name: str
-    model_type: str
-    model_size: str
-    file_path: str
-    quantization: str
-    context_window: int
-    is_active: bool
-    settings: Dict[str, Any]
-    created_at: datetime
-
-@dataclass
-class AdminUser:
-    """Entity representing an admin user"""
-    user_id: str
-    username: str
-    role: str
-    permissions: List[str]
-    created_at: datetime
-    last_login: Optional[datetime]
-```
-
-### 4.3. Chức năng 1: LLM Model Management
-
-#### 4.3.1. Thiết kế giao diện
-
-```
-┌─────────────────────────────────────────────┐
-│          LLM MODEL MANAGEMENT                │
-├─────────────────────────────────────────────┤
-│                                              │
-│  Active Models:                             │
-│  ┌────────────────────────────────────────┐ │
-│  │ 🤖 Llama 3.1 - 8B                      │ │
-│  │    Status: ✅ Active                   │ │
-│  │    Context: 128k tokens                │ │
-│  │    Quantization: Q4_K_M                │ │
-│  │    [Configure] [Test] [Deactivate]     │ │
-│  ├────────────────────────────────────────┤ │
-│  │ 🤖 Qwen 2.5 - 3B                       │ │
-│  │    Status: ✅ Active                   │ │
-│  │    Context: 32k tokens                 │ │
-│  │    Quantization: Q5_K_M                │ │
-│  │    [Configure] [Test] [Deactivate]     │ │
-│  └────────────────────────────────────────┘ │
-│                                              │
-│  Model Configuration:                       │
-│  ┌────────────────────────────────────────┐ │
-│  │ Temperature: [0.7 ━━━━●━━━━] 1.0       │ │
-│  │ Max Tokens: [2048 ▼]                   │ │
-│  │ Top P: [0.95 ━━━━━━━━●━] 1.0          │ │
-│  │ Top K: [40 ▼]                          │ │
-│  │ Repeat Penalty: [1.1 ━━●━━━━━] 2.0    │ │
-│  │                                         │ │
-│  │ [Save Settings] [Reset to Default]     │ │
-│  └────────────────────────────────────────┘ │
-│                                              │
-│  [+ Add New Model] [Download Models]        │
-│                                              │
-└─────────────────────────────────────────────┘
-```
-
-#### 4.3.2. Thiết kế lớp chi tiết
-
-```mermaid
-classDiagram
-    class LamaCppClient {
-        -Llama model
-        -BaseModelSettings model_settings
-        -Path model_path
-        +load_model(model_settings)
-        +generate(prompt, max_tokens, temperature)
-        +stream_generate(prompt, callback)
-        +parse_token(token)
-        +get_model_info()
-        +unload_model()
-    }
-
-    class ModelRegistry {
-        -Dict~str,BaseModelSettings~ models
-        +register_model(name, settings)
-        +get_model_settings(name)
-        +get_models()
-        +get_model_info(name)
-        +update_model_settings(name, params)
-    }
-
-    class BaseModelSettings {
-        <<abstract>>
-        +str model_name
-        +str model_file
-        +int context_window
-        +float temperature
-        +int max_tokens
-        +get_model_params()*
-        +validate_settings()*
-    }
-
-    class LlamaSettings {
-        +get_model_params()
-        +validate_settings()
-        +get_chat_template()
-    }
-
-    class QwenSettings {
-        +get_model_params()
-        +validate_settings()
-        +get_chat_template()
-    }
-
-    class ModelDownloader {
-        -str download_path
-        +download_model(model_url, model_name)
-        +verify_checksum(file_path, expected_hash)
-        +get_available_models()
-        +get_download_progress()
-    }
-
-    class ModelTester {
-        -LamaCppClient client
-        +test_generation(prompt)
-        +benchmark_speed()
-        +validate_output_format()
-        +check_memory_usage()
-    }
-
-    LamaCppClient --> BaseModelSettings : uses
-    ModelRegistry --> BaseModelSettings : manages
-    BaseModelSettings <|-- LlamaSettings
-    BaseModelSettings <|-- QwenSettings
-    ModelTester --> LamaCppClient : tests
-```
-
-**Giải thích thiết kế:**
-- **LamaCppClient**: Client chính để tương tác với LLM
-- **ModelRegistry**: Quản lý registry của các model
-- **BaseModelSettings**: Abstract class cho settings của model
-- **ModelDownloader**: Xử lý download và verify model files
-- **ModelTester**: Test và benchmark các model
-
-#### 4.3.3. Biểu đồ hoạt động
-
-```mermaid
-activity
-  start
-  :Admin accesses model management;
-
-  :Display available models;
-
-  switch (Admin action?)
-  case (Add new model)
-    :Select model from repository;
-    :Download model file;
-    :Verify checksum;
-    :Configure initial settings;
-    :Test model generation;
-    if (Test successful?) then (yes)
-      :Save model configuration;
-      :Activate model;
-    else (no)
-      :Show error;
-      :Rollback changes;
-    endif
-  case (Configure model)
-    :Load current settings;
-    :Display configuration form;
-    :Admin adjusts parameters;
-    :Validate parameters;
-    :Test with new settings;
-    :Save configuration;
-  case (Test model)
-    :Load model;
-    :Run benchmark tests;
-    :Check memory usage;
-    :Generate sample responses;
-    :Display test results;
-  endswitch
-
-  :Log admin action;
-  :Update model status;
-  stop
-```
-
-#### 4.3.4. Biểu đồ tuần tự
-
-```mermaid
-sequenceDiagram
-    participant Admin
-    participant AdminUI
-    participant ModelController
-    participant ModelRegistry
-    participant LamaCppClient
-    participant ModelDownloader
-    participant Database
-
-    Admin->>AdminUI: Access model management
-    AdminUI->>ModelController: get_available_models()
-    ModelController->>ModelRegistry: list_models()
-    ModelRegistry-->>ModelController: models[]
-    ModelController-->>AdminUI: model_list
-    AdminUI-->>Admin: Display models
-
-    Admin->>AdminUI: Add new model (Llama 3.1)
-    AdminUI->>ModelController: add_model(model_info)
-
-    ModelController->>ModelDownloader: download_model(url)
-    ModelDownloader-->>ModelController: download_progress
-    ModelController-->>AdminUI: Update progress
-
-    ModelDownloader-->>ModelController: model_file_path
-    ModelController->>ModelDownloader: verify_checksum(file)
-    ModelDownloader-->>ModelController: checksum_valid
-
-    ModelController->>ModelRegistry: create_settings(model_type)
-    ModelRegistry-->>ModelController: model_settings
-
-    ModelController->>LamaCppClient: load_model(settings)
-    LamaCppClient-->>ModelController: model_loaded
-
-    ModelController->>LamaCppClient: test_generation("Test prompt")
-    LamaCppClient-->>ModelController: test_response
-
-    ModelController->>Database: save_model_config(model)
-    Database-->>ModelController: saved
-
-    ModelController-->>AdminUI: model_added_successfully
-    AdminUI-->>Admin: Show success message
-```
-
-### 4.4. Chức năng 2: Admin Dashboard và System Monitoring
-
-#### 4.4.1. Thiết kế giao diện
-
-```
-┌─────────────────────────────────────────────┐
-│         ADMIN DASHBOARD - PTIT CHATBOT       │
-├─────────────────────────────────────────────┤
-│  📊 System Overview          🔄 Auto-refresh │
-│  ┌────────────────────────────────────────┐ │
-│  │ Active Users: 127    CPU Usage: 45%    │ │
-│  │ Total Chats: 3,421   RAM: 8.2/16 GB    │ │
-│  │ Avg Response: 2.3s   GPU: 65%          │ │
-│  └────────────────────────────────────────┘ │
-│                                              │
-│  📈 Real-time Metrics:                      │
-│  ┌────────────────────────────────────────┐ │
-│  │     Requests per Minute                 │ │
-│  │ 100 ┤     ╱╲                          │ │
-│  │  75 ┤    ╱  ╲    ╱╲                   │ │
-│  │  50 ┤   ╱    ╲__╱  ╲                  │ │
-│  │  25 ┤__╱            ╲                 │ │
-│  │   0 └────────────────────────          │ │
-│  │     00:00  06:00  12:00  18:00  24:00  │ │
-│  └────────────────────────────────────────┘ │
-│                                              │
-│  🗂️ Recent Activities:                      │
-│  ┌────────────────────────────────────────┐ │
-│  │ 10:23 - Admin added new document       │ │
-│  │ 10:15 - Model Llama 3.1 activated      │ │
-│  │ 09:45 - System backup completed        │ │
-│  │ 09:30 - User feedback: 5 stars        │ │
-│  └────────────────────────────────────────┘ │
-│                                              │
-│  Quick Actions:                             │
-│  [📁 Manage Docs] [🤖 Models] [👥 Users]   │
-│  [📊 Reports] [⚙️ Settings] [🔒 Logout]    │
-│                                              │
-└─────────────────────────────────────────────┘
-```
-
-#### 4.4.2. Thiết kế lớp chi tiết
-
-```mermaid
-classDiagram
-    class AdminDashboard {
-        -SystemMonitor monitor
-        -MetricsCollector metrics
-        -ActivityLogger logger
-        +get_system_overview()
-        +get_realtime_metrics()
-        +get_recent_activities()
-        +export_report(date_range)
-    }
-
-    class SystemMonitor {
-        -cpu_usage: float
-        -memory_usage: float
-        -gpu_usage: float
-        -active_connections: int
-        +get_system_stats()
-        +monitor_resources()
-        +check_health_status()
-        +alert_on_threshold()
-    }
-
-    class MetricsCollector {
+    class ConversationManager {
         -Database db
-        +collect_chat_metrics()
-        +collect_response_times()
-        +collect_user_metrics()
-        +aggregate_metrics(period)
-        +generate_chart_data()
+        +getHistory(conversationId, limit) List~Message~
+        +saveMessage(Message) void
+        +summarizeHistory(List~Message~) str
     }
 
-    class ActivityLogger {
-        -Queue activity_queue
-        +log_activity(user, action, details)
-        +get_recent_activities(limit)
-        +search_activities(filters)
-        +export_logs(format)
+    class SynthesizedContext {
+        +String formattedPrompt
+        +List~SearchResult~ rankedSources
+        +String conversationSummary
+        +int totalTokens
+        +Map metadata
     }
 
-    class ReportGenerator {
-        -template_engine: TemplateEngine
-        +generate_daily_report()
-        +generate_usage_report(date_range)
-        +generate_performance_report()
-        +export_to_pdf(report)
-        +schedule_reports()
+    class ScoredDocument {
+        +SearchResult document
+        +float rerankScore
+        +float combinedScore
     }
 
-    class AdminAuthManager {
-        -session_manager: SessionManager
-        +authenticate(username, password)
-        +authorize(user, resource, action)
-        +create_session(user)
-        +validate_token(token)
-        +logout(session_id)
-    }
-
-    AdminDashboard --> SystemMonitor : uses
-    AdminDashboard --> MetricsCollector : uses
-    AdminDashboard --> ActivityLogger : uses
-    AdminDashboard --> ReportGenerator : uses
-    AdminDashboard --> AdminAuthManager : protected by
+    ContextSynthesizer --> RerankerService
+    ContextSynthesizer --> PromptTemplate
+    ContextSynthesizer --> ConversationManager
+    ContextSynthesizer ..> SynthesizedContext : creates
+    RerankerService ..> ScoredDocument : creates
 ```
 
-**Giải thích thiết kế:**
-- **AdminDashboard**: Controller chính cho dashboard
-- **SystemMonitor**: Giám sát tài nguyên hệ thống
-- **MetricsCollector**: Thu thập và tổng hợp metrics
-- **ActivityLogger**: Ghi log hoạt động admin
-- **ReportGenerator**: Tạo báo cáo tự động
-- **AdminAuthManager**: Quản lý authentication và authorization
+**Giải thích:**
 
-#### 4.4.3. Biểu đồ hoạt động
+1. **ContextSynthesizer** (Main orchestrator)
+   - `synthesize()`: Pipeline tổng hợp context
+   - `rerank()`: Re-rank kết quả tìm kiếm bằng cross-encoder
+   - `mergeConversationContext()`: Tích hợp lịch sử hội thoại
+   - `truncateToTokenLimit()`: Cắt bớt nếu vượt token limit
+
+2. **RerankerService** (Re-ranking engine)
+   - Sử dụng cross-encoder model (BERT-based) để đánh giá lại relevance
+   - `scoreRelevance()`: Tính score giữa query và document (0-1)
+
+3. **PromptTemplate** (Prompt engineering)
+   - Quản lý system prompt, user prompt template
+   - `fewShotExamples`: Ví dụ mẫu để cải thiện output quality
+
+4. **ConversationManager** (History management)
+   - `getHistory()`: Lấy n tin nhắn gần nhất
+   - `summarizeHistory()`: Tóm tắt lịch sử nếu quá dài
+
+5. **SynthesizedContext** (Final context object)
+   - Chứa prompt đã format, ranked sources, metadata
+
+### 4.3.4. Biểu đồ hoạt động
 
 ```mermaid
-activity
-  start
-  :Admin login;
+flowchart TD
+    Start([Nhận query + search_results]) --> HasHistory{Có conversation<br/>history?}
 
-  if (Valid credentials?) then (no)
-    :Show error;
-    stop
-  else (yes)
-    :Create session;
-  endif
+    HasHistory -->|Có| GetHistory[Lấy 5 tin nhắn gần nhất]
+    GetHistory --> CheckHistorySize{History > 1000 tokens?}
+    CheckHistorySize -->|Có| SummarizeHistory[Summarize history<br/>bằng LLM]
+    CheckHistorySize -->|Không| MergeHistory[Merge history vào context]
+    SummarizeHistory --> MergeHistory
 
-  :Load dashboard;
+    HasHistory -->|Không| Rerank[Rerank search results<br/>bằng cross-encoder]
+    MergeHistory --> Rerank
 
-  fork
-    :Fetch system metrics;
-  fork again
-    :Load recent activities;
-  fork again
-    :Calculate statistics;
-  end fork
+    Rerank --> FilterLowScore[Filter documents<br/>score < threshold 0.3]
+    FilterLowScore --> SortByScore[Sort by rerank score DESC]
+    SortByScore --> BuildPrompt[Build prompt từ template]
 
-  :Display dashboard;
+    BuildPrompt --> AddSources[Add top N sources vào prompt]
+    AddSources --> CountTokens[Đếm tokens]
+    CountTokens --> CheckLimit{Tokens > max_limit?}
 
-  while (Admin logged in?) is (yes)
-    :Auto-refresh metrics;
+    CheckLimit -->|Có| RemoveLowest[Xóa document score thấp nhất]
+    RemoveLowest --> CountTokens
 
-    if (Admin action?) then (yes)
-      switch (Action type?)
-      case (View reports)
-        :Generate report;
-        :Display/Export;
-      case (Manage documents)
-        :Open document manager;
-        :Process documents;
-      case (Configure system)
-        :Load settings;
-        :Update configuration;
-        :Apply changes;
-      case (View logs)
-        :Query activity logs;
-        :Display filtered results;
-      endswitch
-    endif
-
-    :Update dashboard;
-    :Check for alerts;
-
-    if (Critical alert?) then (yes)
-      :Send notification;
-      :Log incident;
-    endif
-  endwhile (no)
-
-  :Logout;
-  :Clear session;
-  stop
+    CheckLimit -->|Không| FinalContext[Tạo SynthesizedContext]
+    FinalContext --> End([Trả về context])
 ```
 
-#### 4.4.4. Biểu đồ tuần tự
+### 4.3.5. Biểu đồ tuần tự
 
 ```mermaid
 sequenceDiagram
-    participant Admin
-    participant AuthManager
-    participant Dashboard
-    participant SystemMonitor
-    participant MetricsDB
-    participant ActivityLog
-    participant ReportGen
+    participant Handler as RAGQueryHandler
+    participant Synth as ContextSynthesizer
+    participant Conv as ConversationManager
+    participant Rerank as RerankerService
+    participant Template as PromptTemplate
 
-    Admin->>AuthManager: login(credentials)
-    AuthManager->>AuthManager: validate_credentials()
-    AuthManager-->>Dashboard: session_token
+    Handler->>Synth: synthesize(query, search_results, conv_id)
 
-    Dashboard->>SystemMonitor: get_system_stats()
-    SystemMonitor->>SystemMonitor: check_cpu()
-    SystemMonitor->>SystemMonitor: check_memory()
-    SystemMonitor->>SystemMonitor: check_gpu()
-    SystemMonitor-->>Dashboard: system_stats
+    alt Has conversation history
+        Synth->>Conv: getHistory(conv_id, limit=5)
+        Conv-->>Synth: List<Message>
 
-    par Parallel Data Loading
-        Dashboard->>MetricsDB: get_chat_metrics(last_24h)
-        MetricsDB-->>Dashboard: chat_data
-    and
-        Dashboard->>ActivityLog: get_recent_activities(20)
-        ActivityLog-->>Dashboard: activities[]
+        alt History too long
+            Synth->>Synth: summarizeHistory()
+        end
+
+        Synth->>Synth: merge history to context
     end
 
-    Dashboard-->>Admin: Display dashboard
+    Synth->>Rerank: rerank(query, search_results)
+    loop For each document
+        Rerank->>Rerank: scoreRelevance(query, doc)
+    end
+    Rerank-->>Synth: List<ScoredDocument> (sorted)
 
-    loop Every 30 seconds
-        Dashboard->>SystemMonitor: refresh_metrics()
-        SystemMonitor-->>Dashboard: updated_metrics
-        Dashboard->>Admin: Update display
+    Synth->>Synth: filter(score >= threshold)
+
+    Synth->>Template: format(query, top_docs, history)
+    Template->>Template: apply system_prompt
+    Template->>Template: apply few_shot_examples
+    Template->>Template: insert sources
+    Template-->>Synth: formatted_prompt
+
+    loop While tokens > max_limit
+        Synth->>Synth: remove lowest_score_doc
+        Synth->>Synth: count_tokens(prompt)
     end
 
-    Admin->>Dashboard: generate_report(weekly)
-    Dashboard->>ReportGen: create_weekly_report()
-
-    par Report Generation
-        ReportGen->>MetricsDB: query_metrics(week)
-        MetricsDB-->>ReportGen: weekly_metrics
-    and
-        ReportGen->>ActivityLog: query_logs(week)
-        ActivityLog-->>ReportGen: weekly_logs
-    end
-
-    ReportGen->>ReportGen: compile_report()
-    ReportGen->>ReportGen: generate_pdf()
-    ReportGen-->>Dashboard: report_file
-    Dashboard-->>Admin: Download report
+    Synth->>Synth: create SynthesizedContext
+    Synth-->>Handler: SynthesizedContext {prompt, sources, metadata}
 ```
 
 ---
 
-## PHẦN 5: TỔNG KẾT
+## 5. TƯƠNG TÁC VỚI CÁC MODULE KHÁC
 
-### 5.1. Phân công công việc
+### 5.1. Tương tác với Server 1 (Training Module)
 
-| Thành viên | Module phụ trách | Công việc chính |
-|------------|------------------|-----------------|
-| Nguyễn Văn A | RAG Core & Vector DB | - Xây dựng Vector Database<br>- Implement similarity search<br>- Document processing pipeline |
-| Trần Thị B | Chat Interface & Conversation | - Giao diện chat Streamlit<br>- WebSocket real-time<br>- Context synthesis strategies |
-| Lê Văn C | LLM & Admin | - LLM client management<br>- Admin dashboard<br>- System monitoring |
+```mermaid
+sequenceDiagram
+    participant S1 as Server 1<br/>(Training Module)
+    participant S2 as Server 2<br/>(RAG Module - Bạn 2)
+    participant VDB as VectorStore
 
-### 5.2. Timeline dự kiến
+    Note over S1: Model được retrain với dữ liệu mới
 
-1. **Tuần 1-2:** Setup môi trường, cài đặt dependencies
-2. **Tuần 3-4:** Implement core modules (Vector DB, LLM Client)
-3. **Tuần 5-6:** Xây dựng Chat Interface và WebSocket
-4. **Tuần 7-8:** Develop Admin Dashboard và monitoring
-5. **Tuần 9-10:** Integration testing và optimization
-6. **Tuần 11-12:** User testing và documentation
+    S1->>S2: POST /vector/sync<br/>{new_documents, operation: "upsert"}
+    S2->>VDB: Embedding + Index documents
+    VDB-->>S2: Sync success
+    S2-->>S1: 200 OK {synced_count}
 
-### 5.3. Các rủi ro và giải pháp
+    Note over S2: Documents đã được index
 
-1. **Performance issues với LLM lớn:**
-   - Giải pháp: Sử dụng quantization, implement caching
+    S1->>S2: POST /model/update<br/>{model_version, model_path}
+    S2->>S2: Load new model version
+    S2-->>S1: 200 OK {model_loaded}
+```
 
-2. **Context overflow:**
-   - Giải pháp: Implement multiple synthesis strategies
+**API cần thiết từ Server 1:**
+- `POST /vector/sync`: Đồng bộ documents
+- `POST /model/update`: Thông báo model mới
+- `GET /documents/latest`: Lấy documents mới nhất
 
-3. **Real-time latency:**
-   - Giải pháp: Streaming response, async processing
+### 5.2. Tương tác với Client 2 (Customer UI)
 
-4. **Accuracy của RAG:**
-   - Giải pháp: Fine-tune embeddings, improve chunking strategy
+```mermaid
+sequenceDiagram
+    participant C2 as Client 2<br/>(Customer UI - Bạn 3)
+    participant S2 as Server 2<br/>(RAG Module - Bạn 2)
+    participant Auth as AuthService<br/>(do Bạn 3 quản lý)
+
+    C2->>Auth: POST /auth/login {username, password}
+    Auth-->>C2: 200 OK {access_token}
+
+    C2->>S2: POST /chat/query<br/>Header: Authorization Bearer token<br/>{query, user_id}
+
+    S2->>Auth: Verify token (internal call)
+    Auth-->>S2: User validated
+
+    S2->>S2: Process RAG query
+    S2-->>C2: 200 OK {answer, sources, confidence}
+
+    Note over C2: Display answer + sources in UI
+```
+
+**API cần từ Client 2/Auth Module:**
+- `POST /auth/verify`: Verify JWT token
+- `GET /user/{user_id}`: Lấy thông tin user (lưu conversation)
+
+### 5.3. Biểu đồ triển khai (Deployment Diagram)
+
+```mermaid
+graph TB
+    subgraph "Server 1 - Training Module (Bạn 1)"
+        S1[Training API Service]
+        DB1[(ML Database<br/>Models & Training Data)]
+        S1 -.->|read/write| DB1
+    end
+
+    subgraph "Server 2 - RAG Module (Bạn 2)"
+        S2[FastAPI Service]
+        VDB[(ChromaDB<br/>Vector Store)]
+        Redis[(Redis Cache)]
+        MongoDB[(MongoDB<br/>Conversations)]
+        S2 --> VDB
+        S2 --> Redis
+        S2 --> MongoDB
+    end
+
+    subgraph "Client 1 - Admin UI (Bạn 3)"
+        C1[Admin Dashboard]
+    end
+
+    subgraph "Client 2 - Customer UI (Bạn 3)"
+        C2[Chat Interface]
+        Auth[Auth Service]
+        DB2[(User Database)]
+        Auth --> DB2
+    end
+
+    C1 -->|Manage data & models| S1
+    S1 -->|Sync documents| S2
+    C2 -->|Chat queries| S2
+    C2 -->|Login/Register| Auth
+    S2 -.->|Verify token| Auth
+
+    style S2 fill:#90EE90
+    style VDB fill:#90EE90
+    style Redis fill:#90EE90
+    style MongoDB fill:#90EE90
+```
 
 ---
 
-**Ghi chú:** Báo cáo này được thiết kế cho hệ thống Chatbot tư vấn thông tin trường PTIT sử dụng kiến trúc RAG với các công nghệ open-source hiện đại. Thiết kế có thể được điều chỉnh dựa trên feedback và yêu cầu cụ thể của dự án.
+## 6. ĐÁNH GIÁ & TỐI ƯU HÓA
+
+### 6.1. Metrics theo dõi
+
+1. **Performance Metrics:**
+   - Response time (p50, p95, p99)
+   - Cache hit rate
+   - Vector search latency
+   - LLM generation time
+
+2. **Quality Metrics:**
+   - Confidence score distribution
+   - User feedback (thumbs up/down)
+   - Source relevance score
+
+3. **System Metrics:**
+   - Vector DB size
+   - Index optimization frequency
+   - Embedding cost per query
+
+### 6.2. Chiến lược tối ưu hóa
+
+1. **Caching Strategy:**
+   - Cache câu hỏi phổ biến (FAQ)
+   - TTL: 1 giờ cho dynamic content, 24 giờ cho static content
+
+2. **Batch Processing:**
+   - Batch embedding để giảm API calls
+   - Async vector sync để không block
+
+3. **Index Optimization:**
+   - HNSW index với M=16, efConstruction=200
+   - Rebuild index khi size tăng 20%
+
+4. **Reranking:**
+   - Chỉ rerank top 20 results từ vector search
+   - Use cross-encoder cho high-precision tasks
+
+---
+
+## 7. KẾT LUẬN
+
+### 7.1. Tổng kết
+Module 2 (RAG Chatbot) là trung tâm xử lý của hệ thống, kết nối:
+- **Server 1**: Nhận documents và model updates
+- **Client 2**: Phục vụ chat queries cho end-users
+
+Thiết kế tập trung vào:
+- **Scalability**: Vector DB có thể scale đến hàng triệu documents
+- **Performance**: Cache + batch processing + async
+- **Accuracy**: Reranking + context synthesis + conversation history
+
+### 7.2. Công việc tiếp theo
+1. Implement core RAG pipeline
+2. Setup ChromaDB + embedding service
+3. Integration testing với Server 1 và Client 2
+4. Performance tuning & monitoring
+
+---
+
+**Ngày hoàn thành:** [Ngày/Tháng/Năm]
+**Chữ ký:** _______________
