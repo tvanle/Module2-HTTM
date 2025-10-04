@@ -354,23 +354,23 @@ flowchart TD
     ReturnCache --> End([Kết thúc])
 
     CheckCache -->|Không| Embed[Embedding query thành vector]
-    Embed --> Search[Vector similarity search<br/>top_k documents]
-    Search --> HasResults{Tìm thấy<br/>documents?}
+    Embed --> Search["Vector similarity search (top_k documents)"]
+    Search --> HasResults{Tìm thấy documents?}
 
-    HasResults -->|Không| Fallback[Trả về câu trả lời mặc định:<br/>"Xin lỗi, tôi không tìm thấy..."]
+    HasResults -->|Không| Fallback["Trả về câu trả lời mặc định: Xin lỗi, tôi không tìm thấy..."]
     Fallback --> End
 
-    HasResults -->|Có| Rank[Re-rank kết quả<br/>theo relevance]
-    Rank --> BuildContext[Xây dựng context prompt:<br/>Query + Top documents]
-    BuildContext --> CheckTokens{Context vượt<br/>token limit?}
+    HasResults -->|Có| Rank["Re-rank kết quả theo relevance"]
+    Rank --> BuildContext["Xây dựng context prompt: Query + Top documents"]
+    BuildContext --> CheckTokens{Context vượt token limit?}
 
-    CheckTokens -->|Có| Truncate[Cắt bớt documents<br/>ưu tiên score cao]
+    CheckTokens -->|Có| Truncate["Cắt bớt documents ưu tiên score cao"]
     Truncate --> Generate
     CheckTokens -->|Không| Generate[Gọi LLM generate answer]
 
-    Generate --> ParseResponse[Parse response +<br/>extract sources]
+    Generate --> ParseResponse["Parse response + extract sources"]
     ParseResponse --> SaveCache[Lưu vào cache]
-    SaveCache --> LogMetrics[Log metrics:<br/>latency, confidence]
+    SaveCache --> LogMetrics["Log metrics: latency, confidence"]
     LogMetrics --> Return[Trả về ChatResponse]
     Return --> End
 ```
