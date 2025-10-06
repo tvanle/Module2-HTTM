@@ -13,20 +13,21 @@ Module 2 đóng vai trò là **trung tâm xử lý RAG (Retrieval-Augmented Gene
 - Nhận câu hỏi từ Client 2 (Customer)
 - Tìm kiếm thông tin liên quan từ vector database
 - Tổng hợp context và sinh câu trả lời qua LLM
-- Tích hợp model từ Server 1
+- Đồng bộ documents từ Server 1
 - Trả kết quả về Client 2
 
 ### 1.2. Chức năng chính
-1. **RAG Query Processing**: Xử lý câu hỏi và truy xuất thông tin
-2. **Vector Database Management**: Quản lý embedding và similarity search
-3. **LLM Integration & Context Building**: Tích hợp LLM và xây dựng context thông minh
+Module hoạt động như một **RAG Pipeline** bao gồm:
+- **Chức năng 1**: RAG Query Processing (Chat với user)
+- **Chức năng 2**: Vector Database Management (Quản lý vector store)
+- **Chức năng 3**: Document Sync (Đồng bộ với Server 1)
 
 ### 1.3. Công nghệ sử dụng
-- **Backend Framework**: FastAPI / Flask
-- **Vector Database**: ChromaDB / Pinecone
+- **Backend Framework**: FastAPI
+- **Vector Database**: ChromaDB
 - **LLM**: OpenAI API / Local LLM
-- **Embedding Model**: sentence-transformers / OpenAI embeddings
-- **Cache**: Redis (optional)
+- **Embedding Model**: sentence-transformers
+- **Database**: PostgreSQL (conversations)
 
 ---
 
@@ -42,9 +43,7 @@ Module 2 đóng vai trò là **trung tâm xử lý RAG (Retrieval-Augmented Gene
     "metadata": {
         "source": "ptit_tuyen_sinh.pdf",
         "category": "tuyen_sinh",
-        "chunk_index": 0,
-        "timestamp": "2025-01-15T10:30:00Z",
-        "version": "v1.0"
+        "chunk_index": 0
     },
     "embedding": [0.123, 0.456, ...] # Vector 768 chiều
 }
@@ -53,9 +52,7 @@ Module 2 đóng vai trò là **trung tâm xử lý RAG (Retrieval-Augmented Gene
 **Giải thích:**
 - `id`: Unique identifier cho mỗi chunk
 - `document`: Văn bản đã được chunking
-- `metadata.source`: File nguồn gốc
-- `metadata.category`: Danh mục (tuyển sinh, học phí, chương trình đào tạo, v.v.)
-- `metadata.chunk_index`: Thứ tự chunk trong document
+- `metadata`: Thông tin nguồn gốc, danh mục
 - `embedding`: Vector đại diện ngữ nghĩa
 
 ### 2.2. Conversation History Schema (PostgreSQL)
@@ -65,9 +62,7 @@ Module 2 đóng vai trò là **trung tâm xử lý RAG (Retrieval-Augmented Gene
 CREATE TABLE conversations (
     conversation_id VARCHAR(36) PRIMARY KEY,
     user_id VARCHAR(36) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    status VARCHAR(20) DEFAULT 'active'
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
@@ -78,15 +73,13 @@ CREATE TABLE messages (
     conversation_id VARCHAR(36) REFERENCES conversations(conversation_id),
     role VARCHAR(10) NOT NULL, -- 'user' or 'assistant'
     content TEXT NOT NULL,
-    sources JSON, -- [{doc_id, score, snippet}, ...]
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    metadata JSON -- {model_version, response_time, etc.}
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
 ---
 
-## 3. THIẾT KẾ LỚP THỰC THỂ (CLASS DIAGRAM)
+## 3. THIẾT KẾ LỚP THỰC THỂ
 
 ### 3.1. Entity Classes
 
@@ -95,115 +88,68 @@ classDiagram
     class Document {
         +String id
         +String content
-        +DocumentMetadata metadata
+        +Map metadata
         +List~float~ embedding
-        +toDict() dict
-    }
-
-    class DocumentMetadata {
-        +String source
-        +String category
-        +int chunkIndex
-        +DateTime timestamp
-        +String version
     }
 
     class Query {
         +String queryId
         +String userId
         +String text
-        +DateTime timestamp
     }
 
     class ChatResponse {
         +String answer
-        +List~SearchResult~ sources
-        +float confidence
-        +int responseTime
-        +toJSON() dict
+        +List~Document~ sources
     }
 
     class Conversation {
         +String conversationId
         +String userId
         +List~Message~ messages
-        +DateTime createdAt
-        +addMessage(Message) void
-        +getContext(int) str
     }
 
     class Message {
         +String messageId
-        +String conversationId
         +String role
         +String content
-        +List~SearchResult~ sources
-        +DateTime createdAt
     }
 
-    Document "1" *-- "1" DocumentMetadata
-    ChatResponse "1" *-- "*" SearchResult
     Conversation "1" *-- "*" Message
 ```
 
 ---
 
-## 4. KIẾN TRÚC TỔNG QUAN MODULE
-
-### 4.1. Sơ đồ kiến trúc hệ thống
+## 4. KIẾN TRÚC HỆ THỐNG
 
 ```mermaid
 graph TB
-    Client[Client 2 - Customer UI] -->|POST /chat/query| API[RAG API Gateway]
+    Client["Client 2 - Customer UI"] -->|POST /chat/query| API[RAG API]
 
-    API --> Cache{Redis Cache}
-    Cache -->|Cache hit| API
-    Cache -->|Cache miss| Handler[RAG Query Handler]
-
+    API --> Handler[RAG Query Handler]
     Handler --> Embed[Embedding Service]
-    Embed --> VDB[Vector Store - ChromaDB]
-
-    VDB --> Rerank[Reranker Service]
-    Rerank --> Context[Context Builder]
+    Embed --> VDB["Vector Store - ChromaDB"]
+    VDB --> Context[Context Builder]
     Context --> LLM[LLM Service]
-
-    LLM --> Response[Chat Response]
-    Response --> Cache
-    Response --> API
-
+    LLM --> API
     API --> Client
 
-    S1[Server 1 - Training] -.->|Sync docs| Sync[Vector Sync Manager]
-    Sync --> VDB
+    S1["Server 1 - Training"] -.->|POST /vector/sync| Sync[Vector Sync Manager]
+    Sync --> Embed
+    Embed --> VDB
 
     style Handler fill:#90EE90
     style VDB fill:#90EE90
     style LLM fill:#90EE90
 ```
 
-### 4.2. Workflow tổng quát
-
-**Pipeline xử lý query:**
-1. **Check Cache**: Kiểm tra cache (Redis) có kết quả không
-2. **Embedding**: Chuyển query thành vector embedding
-3. **Vector Search**: Tìm kiếm top-k documents tương tự
-4. **Reranking**: Re-rank kết quả bằng cross-encoder (tùy chọn)
-5. **Context Building**: Xây dựng prompt từ query + documents + history
-6. **LLM Generation**: Gọi LLM để sinh câu trả lời
-7. **Cache & Return**: Lưu cache và trả về kết quả
-
 ---
 
-## 5. THIẾT KẾ CHI TIẾT CÁC CHỨC NĂNG
+# CHỨC NĂNG 1: RAG QUERY PROCESSING (CHAT VỚI USER)
 
----
+## 5.1. Thiết kế giao diện
 
-## CHỨC NĂNG 1: RAG QUERY PROCESSING
-
-### 5.1.1. Mô tả
-Xử lý câu hỏi từ user, tìm kiếm thông tin liên quan, tổng hợp context và sinh câu trả lời.
-
-### 5.1.2. Thiết kế giao diện API
+### 5.1.1. Server Backend API
 
 #### Endpoint: `POST /api/v1/chat/query`
 
@@ -212,12 +158,7 @@ Xử lý câu hỏi từ user, tìm kiếm thông tin liên quan, tổng hợp c
 {
     "query": "Học phí ngành CNTT năm 2025 là bao nhiêu?",
     "user_id": "user_123",
-    "conversation_id": "conv_456",
-    "options": {
-        "top_k": 5,
-        "temperature": 0.7,
-        "use_cache": true
-    }
+    "conversation_id": "conv_456"
 }
 ```
 
@@ -230,144 +171,209 @@ Xử lý câu hỏi từ user, tìm kiếm thông tin liên quan, tổng hợp c
         "conversation_id": "conv_456",
         "sources": [
             {
-                "doc_id": "doc_tuyen_sinh_2025_p3",
+                "doc_id": "doc_001",
                 "content": "Học phí các ngành năm 2025: CNTT: 12tr...",
-                "score": 0.89,
-                "metadata": {
-                    "source": "tuyen_sinh_2025.pdf",
-                    "category": "hoc_phi"
-                }
+                "source": "tuyen_sinh_2025.pdf"
             }
-        ],
-        "confidence": 0.92,
-        "response_time_ms": 450
+        ]
     }
 }
 ```
 
-### 5.1.3. Biểu đồ lớp chi tiết
+### 5.1.2. Client UI (Lớp ảo - Module 3)
+
+**Giao diện chat:**
+
+```
+┌────────────────────────────────────────┐
+│  PTIT Chatbot - Tư vấn sinh viên      │
+├────────────────────────────────────────┤
+│                                        │
+│  User: Học phí CNTT 2025 bao nhiêu?   │
+│                                        │
+│  Bot: Học phí ngành Công nghệ Thông   │
+│       tin năm 2025 là 12.000.000      │
+│       VNĐ/năm...                      │
+│                                        │
+│       📄 Nguồn: tuyen_sinh_2025.pdf   │
+│                                        │
+├────────────────────────────────────────┤
+│  [Nhập câu hỏi...]            [Gửi]  │
+└────────────────────────────────────────┘
+```
+
+**Client → Server 2:**
+```javascript
+POST /api/v1/chat/query
+Headers: { Authorization: "Bearer <token>" }
+Body: { query, user_id, conversation_id }
+```
+
+## 5.2. Thiết kế lớp chi tiết
+
+### 5.2.1. Class Diagram
 
 ```mermaid
 classDiagram
+    class ChatController {
+        -RAGQueryHandler ragHandler
+        +postQuery(request) ChatResponse
+        +getConversationHistory(userId, convId) List~Message~
+    }
+
     class RAGQueryHandler {
         -VectorStore vectorStore
         -EmbeddingService embeddingService
         -LLMService llmService
-        -CacheService cacheService
         -ContextBuilder contextBuilder
-        +processQuery(Query) ChatResponse
+        -ConversationManager conversationManager
+        +processQuery(query: Query) ChatResponse
     }
 
-    class VectorStore {
-        -ChromaClient client
-        +search(embedding, topK) List~SearchResult~
-        +addDocuments(List~Document~) void
-        +getStats() IndexStats
+    class Query {
+        +String queryId
+        +String userId
+        +String conversationId
+        +String text
     }
 
-    class EmbeddingService {
-        -Model embeddingModel
-        +embed(text) List~float~
-        +batchEmbed(List~str~) List~List~float~~
-    }
-
-    class LLMService {
-        -String apiKey
-        -String modelName
-        +generate(prompt, context) str
-        +streamGenerate(prompt, context) Iterator~str~
+    class ChatResponse {
+        +String answer
+        +String conversationId
+        +List~Document~ sources
     }
 
     class ContextBuilder {
-        -int maxTokens
-        -PromptTemplate template
-        +build(Query, List~SearchResult~, history) str
-        +rerank(query, results) List~SearchResult~
+        -ConversationManager convManager
+        +build(query, documents, convId) String
     }
 
-    class CacheService {
-        -RedisClient redis
-        +get(queryHash) ChatResponse
-        +set(queryHash, ChatResponse) void
+    class ConversationManager {
+        -PostgresDB db
+        +saveMessage(convId, message) void
+        +getHistory(convId, limit) List~Message~
+        +createConversation(userId) String
     }
 
-    RAGQueryHandler --> VectorStore
-    RAGQueryHandler --> EmbeddingService
-    RAGQueryHandler --> LLMService
-    RAGQueryHandler --> CacheService
+    ChatController --> RAGQueryHandler
+    RAGQueryHandler --> Query
+    RAGQueryHandler --> ChatResponse
     RAGQueryHandler --> ContextBuilder
+    RAGQueryHandler --> ConversationManager
 ```
 
-**Giải thích các lớp:**
+### 5.2.2. Diễn giải thiết kế
 
-1. **RAGQueryHandler**: Orchestrator chính, điều phối toàn bộ pipeline RAG
-2. **VectorStore**: Interface với ChromaDB, thực hiện similarity search
-3. **EmbeddingService**: Chuyển đổi text thành vector embeddings
-4. **LLMService**: Tích hợp với LLM (OpenAI/Local) để sinh câu trả lời
-5. **ContextBuilder**: Xây dựng prompt, reranking, quản lý token limit
-6. **CacheService**: Quản lý cache với Redis để tối ưu performance
+**Tại sao có các lớp này:**
 
-### 5.1.4. Luồng xử lý đơn giản
+1. **ChatController**:
+   - **Lý do**: Tách biệt HTTP layer với business logic (MVC pattern)
+   - **Trách nhiệm**: Xử lý HTTP requests, validation
+   - **Phương thức**: `postQuery()`, `getConversationHistory()`
+
+2. **RAGQueryHandler**:
+   - **Lý do**: Điều phối toàn bộ RAG pipeline (Facade pattern)
+   - **Trách nhiệm**: Orchestrate: embed → search → build context → generate
+   - **Phương thức**: `processQuery()` - main workflow
+
+3. **Query** (Value Object):
+   - **Lý do**: Encapsulate thông tin query
+   - **Trách nhiệm**: Validation, type safety
+
+4. **ChatResponse** (DTO):
+   - **Lý do**: Standardized response format
+   - **Trách nhiệm**: Đảm bảo contract với client
+
+5. **ContextBuilder**:
+   - **Lý do**: Xây dựng prompt cho LLM
+   - **Trách nhiệm**: Format documents + conversation history thành prompt
+
+6. **ConversationManager**:
+   - **Lý do**: Quản lý conversation persistence
+   - **Trách nhiệm**: CRUD operations với PostgreSQL
+
+## 5.3. Biểu đồ hoạt động
 
 ```mermaid
-flowchart LR
-    A[Nhận Query] --> B{Cache?}
-    B -->|Hit| C[Trả cache]
-    B -->|Miss| D[Embedding]
-    D --> E[Vector Search]
-    E --> F[Rerank & Build Context]
-    F --> G[LLM Generate]
-    G --> H[Save Cache]
-    H --> I[Return Response]
-    C --> I
+flowchart TD
+    Start([User gửi câu hỏi]) --> Validate["ChatController: Validate request"]
+    Validate --> Embed["EmbeddingService: embed query"]
+    Embed --> Search["VectorStore: search (top_k=5)"]
+    Search --> HasResults{"Tìm thấy documents?"}
+
+    HasResults -->|Không| DefaultResp["Trả về: 'Không tìm thấy thông tin'"]
+    DefaultResp --> End([Kết thúc])
+
+    HasResults -->|Có| LoadConv{"Có conversation_id?"}
+    LoadConv -->|Có| GetHistory["ConversationManager: getHistory"]
+    GetHistory --> BuildCtx
+    LoadConv -->|Không| BuildCtx["ContextBuilder: build prompt"]
+
+    BuildCtx --> Generate["LLMService: generate answer"]
+    Generate --> SaveMsg["ConversationManager: saveMessage"]
+    SaveMsg --> Return["Trả về ChatResponse"]
+    Return --> End
+
+    style Embed fill:#E6F3FF
+    style Generate fill:#E6FFE6
+```
+
+## 5.4. Biểu đồ tuần tự
+
+```mermaid
+sequenceDiagram
+    participant User as User
+    participant ClientUI as Client UI (Module 3 - Lớp ảo)
+    participant Controller as ChatController
+    participant RAG as RAGQueryHandler
+    participant Embed as EmbeddingService
+    participant VDB as VectorStore
+    participant Context as ContextBuilder
+    participant Conv as ConversationManager
+    participant LLM as LLMService
+
+    User->>ClientUI: Nhập câu hỏi + click Gửi
+    ClientUI->>Controller: POST /chat/query
+    activate Controller
+
+    Controller->>RAG: processQuery(query)
+    activate RAG
+
+    RAG->>Embed: embed(query.text)
+    Embed-->>RAG: embedding vector
+
+    RAG->>VDB: search(embedding, top_k=5)
+    VDB-->>RAG: 5 documents
+
+    RAG->>Context: build(query, documents, conv_id)
+    activate Context
+    Context->>Conv: getHistory(conv_id, limit=5)
+    Conv-->>Context: conversation history
+    Context->>Context: format prompt
+    Context-->>RAG: final prompt
+    deactivate Context
+
+    RAG->>LLM: generate(prompt)
+    LLM-->>RAG: answer text
+
+    RAG->>Conv: saveMessage(conv_id, user_msg, bot_msg)
+    RAG-->>Controller: ChatResponse
+    deactivate RAG
+
+    Controller-->>ClientUI: 200 OK + JSON
+    deactivate Controller
+    ClientUI-->>User: Hiển thị answer
 ```
 
 ---
 
-## CHỨC NĂNG 2: VECTOR DATABASE MANAGEMENT
+# CHỨC NĂNG 2: VECTOR DATABASE MANAGEMENT
 
-### 5.2.1. Mô tả
-Quản lý việc đồng bộ documents từ Server 1, embedding, và index vào vector database.
+## 5.5. Thiết kế giao diện
 
-### 5.2.2. Thiết kế giao diện API
+### 5.5.1. Server Backend API
 
-#### Endpoint 1: `POST /api/v1/vector/sync`
-Đồng bộ documents mới từ Server 1
-
-**Request:**
-```json
-{
-    "source": "server1_model_update",
-    "documents": [
-        {
-            "id": "doc_new_001",
-            "content": "Nội dung tài liệu mới...",
-            "metadata": {
-                "source": "tuyen_sinh_2026.pdf",
-                "category": "tuyen_sinh",
-                "version": "v2.0"
-            }
-        }
-    ],
-    "operation": "upsert"
-}
-```
-
-**Response:**
-```json
-{
-    "success": true,
-    "data": {
-        "synced_count": 145,
-        "failed_count": 0,
-        "total_vectors": 10245,
-        "sync_time_ms": 3200
-    }
-}
-```
-
-#### Endpoint 2: `GET /api/v1/vector/stats`
-Thống kê vector database
+#### Endpoint: `GET /api/v1/vector/stats`
 
 **Response:**
 ```json
@@ -379,300 +385,463 @@ Thống kê vector database
             {
                 "name": "ptit_knowledge_base",
                 "count": 10245,
-                "dimensions": 768,
                 "categories": {
                     "tuyen_sinh": 3420,
                     "hoc_phi": 1250,
                     "chuong_trinh_dao_tao": 5575
                 }
             }
-        ],
-        "last_update": "2025-01-15T14:30:00Z"
+        ]
     }
 }
 ```
 
-### 5.2.3. Biểu đồ lớp chi tiết
+### 5.5.2. Admin Dashboard UI (Lớp ảo - Module 3)
+
+```
+┌──────────────────────────────────────────────┐
+│  PTIT Admin - Vector Database Management    │
+├──────────────────────────────────────────────┤
+│                                              │
+│  📊 Statistics                               │
+│  ├─ Total Documents: 10,245                 │
+│  └─ Collections: 1                          │
+│                                              │
+│  📁 Categories                               │
+│  ├─ Tuyển sinh: 3,420 (33%)                │
+│  ├─ Học phí: 1,250 (12%)                   │
+│  └─ Đào tạo: 5,575 (55%)                   │
+│                                              │
+│  ⚙️ Actions                                  │
+│  [View Documents] [Search] [Export]         │
+└──────────────────────────────────────────────┘
+```
+
+## 5.6. Thiết kế lớp chi tiết
 
 ```mermaid
 classDiagram
-    class VectorSyncManager {
+    class VectorController {
+        -VectorStatsService statsService
+        +getStats() VectorStatsResponse
+        +searchVectors(query) SearchResults
+    }
+
+    class VectorStatsService {
         -VectorStore vectorStore
-        -EmbeddingService embeddingService
-        -DocumentProcessor docProcessor
-        +syncDocuments(List~Document~, operation) SyncResult
-        +deleteDocuments(List~docId~) bool
-        +getStats() IndexStats
+        +getStatistics() VectorStats
+        +getCategoryBreakdown() Map
     }
 
-    class DocumentProcessor {
-        -Chunker chunker
-        -int chunkSize
-        -int chunkOverlap
-        +process(Document) List~DocumentChunk~
-        +cleanText(str) str
+    class VectorStats {
+        +int totalDocuments
+        +List~CollectionInfo~ collections
     }
 
-    class Chunker {
-        -int maxTokens
-        -String strategy
-        +chunkBySentence(text) List~str~
-        +chunkByTokens(text) List~str~
-        +chunkSemantic(text) List~str~
+    class CollectionInfo {
+        +String name
+        +int count
+        +Map~String,int~ categoryBreakdown
     }
 
-    VectorSyncManager --> VectorStore
-    VectorSyncManager --> EmbeddingService
-    VectorSyncManager --> DocumentProcessor
-    DocumentProcessor --> Chunker
+    VectorController --> VectorStatsService
+    VectorStatsService --> VectorStore
+    VectorStatsService --> VectorStats
+    VectorStats "1" *-- "*" CollectionInfo
 ```
 
-**Giải thích:**
+### 5.6.2. Diễn giải thiết kế
 
-1. **VectorSyncManager**: Quản lý đồng bộ documents từ Server 1
-2. **DocumentProcessor**: Xử lý documents (clean, chunk, extract metadata)
-3. **Chunker**: Chiến lược chia nhỏ documents (sentence, token, semantic)
+1. **VectorController**:
+   - **Lý do**: Expose management APIs cho admin
+   - **Trách nhiệm**: Handle HTTP requests
+   - **Phương thức**: `getStats()`, `searchVectors()`
 
-### 5.2.4. Luồng xử lý sync
+2. **VectorStatsService**:
+   - **Lý do**: Business logic thu thập statistics
+   - **Trách nhiệm**: Aggregate data từ VectorStore
+   - **Phương thức**: `getStatistics()`, `getCategoryBreakdown()`
+
+3. **VectorStats** (DTO):
+   - **Lý do**: Structured stats data
+   - **Trách nhiệm**: Serialize cho API response
+
+4. **CollectionInfo**:
+   - **Lý do**: Represent collection metadata
+   - **Trách nhiệm**: Chi tiết từng collection
+
+## 5.7. Biểu đồ hoạt động
 
 ```mermaid
-flowchart LR
-    A[Server 1 gửi docs] --> B[Validate]
-    B --> C[Process & Chunk]
-    C --> D[Batch Embedding]
-    D --> E[Upsert to VectorDB]
-    E --> F[Update Stats]
-    F --> G[Return Result]
+flowchart TD
+    Start([Admin request stats]) --> GetStats["VectorStatsService: getStatistics()"]
+    GetStats --> QueryVDB["VectorStore: getCollectionInfo()"]
+    QueryVDB --> CountDocs["Count documents"]
+    CountDocs --> GetCat["Aggregate by category"]
+    GetCat --> CreateResp["Create VectorStatsResponse"]
+    CreateResp --> Return["Return JSON"]
+    Return --> End([End])
+
+    style GetStats fill:#E6F3FF
+```
+
+## 5.8. Biểu đồ tuần tự
+
+```mermaid
+sequenceDiagram
+    participant Admin as Admin
+    participant AdminUI as Dashboard (Module 3 - Lớp ảo)
+    participant Ctrl as VectorController
+    participant Stats as VectorStatsService
+    participant VDB as VectorStore
+
+    Admin->>AdminUI: Click "View Stats"
+    AdminUI->>Ctrl: GET /vector/stats
+    activate Ctrl
+
+    Ctrl->>Stats: getStatistics()
+    activate Stats
+
+    Stats->>VDB: getCollectionInfo()
+    VDB-->>Stats: metadata
+
+    Stats->>VDB: countDocuments()
+    VDB-->>Stats: 10245
+
+    Stats->>VDB: aggregateByMetadata("category")
+    VDB-->>Stats: category breakdown
+
+    Stats-->>Ctrl: VectorStats
+    deactivate Stats
+
+    Ctrl-->>AdminUI: 200 OK + JSON
+    deactivate Ctrl
+
+    AdminUI->>AdminUI: Render charts
+    AdminUI-->>Admin: Display
 ```
 
 ---
 
-## CHỨC NĂNG 3: LLM INTEGRATION & CONTEXT BUILDING
+# CHỨC NĂNG 3: DOCUMENT SYNC (ĐỒNG BỘ VỚI SERVER 1)
 
-### 5.3.1. Mô tả
-Tích hợp LLM và xây dựng context thông minh với reranking, conversation history.
+## 5.9. Thiết kế giao diện
 
-### 5.3.2. Biểu đồ lớp chi tiết
+### 5.9.1. Server Backend API
+
+#### Endpoint: `POST /api/v1/vector/sync`
+
+**Request từ Server 1:**
+```json
+{
+    "source": "server1_training",
+    "operation": "upsert",
+    "documents": [
+        {
+            "id": "doc_001",
+            "content": "Nội dung tài liệu...",
+            "metadata": {
+                "source": "file.pdf",
+                "category": "tuyen_sinh"
+            }
+        }
+    ]
+}
+```
+
+**Response:**
+```json
+{
+    "success": true,
+    "data": {
+        "synced_count": 145,
+        "total_vectors": 10390,
+        "sync_time_ms": 3250
+    }
+}
+```
+
+### 5.9.2. Server 1 Integration (Lớp ảo)
+
+**Workflow:**
+
+```
+Server 1                      Server 2
+────────                      ────────
+1. Admin upload docs
+2. Process documents
+3. Trigger sync      ──────>  1. Validate request
+                              2. Process + chunk
+                              3. Generate embeddings
+                              4. Upsert ChromaDB
+                    <──────   5. Return result
+4. Handle response
+```
+
+## 5.10. Thiết kế lớp chi tiết
 
 ```mermaid
 classDiagram
-    class ContextBuilder {
-        -RerankerService reranker
-        -PromptTemplate template
-        -ConversationManager convManager
-        -int maxContextTokens
-        +build(Query, List~SearchResult~, convId) str
+    class SyncController {
+        -VectorSyncManager syncManager
+        +postSync(request) SyncResponse
     }
 
-    class RerankerService {
-        -Model crossEncoder
-        +rerank(query, documents) List~ScoredDocument~
-        +scoreRelevance(query, document) float
+    class VectorSyncManager {
+        -VectorStore vectorStore
+        -EmbeddingService embeddingService
+        -DocumentProcessor processor
+        +syncDocuments(docs, operation) SyncResult
     }
 
-    class PromptTemplate {
-        -String systemPrompt
-        -String userPromptTemplate
-        +format(Query, context, history) str
+    class SyncRequest {
+        +String source
+        +String operation
+        +List~Document~ documents
     }
 
-    class ConversationManager {
-        -Database db
-        +getHistory(conversationId, limit) List~Message~
-        +saveMessage(Message) void
-        +summarizeHistory(messages) str
+    class SyncResponse {
+        +bool success
+        +int syncedCount
+        +int totalVectors
+        +int syncTimeMs
     }
 
-    ContextBuilder --> RerankerService
-    ContextBuilder --> PromptTemplate
-    ContextBuilder --> ConversationManager
+    class DocumentProcessor {
+        -ChunkingStrategy chunker
+        +process(document) List~Chunk~
+        +cleanText(text) String
+        +chunkDocument(text) List~Chunk~
+    }
+
+    class ChunkingStrategy {
+        <<interface>>
+        +chunk(text, chunkSize, overlap) List~String~
+    }
+
+    class SentenceChunker {
+        +chunk(text, chunkSize, overlap) List~String~
+    }
+
+    class TokenChunker {
+        +chunk(text, chunkSize, overlap) List~String~
+    }
+
+    SyncController --> VectorSyncManager
+    VectorSyncManager --> DocumentProcessor
+    DocumentProcessor --> ChunkingStrategy
+    ChunkingStrategy <|.. SentenceChunker
+    ChunkingStrategy <|.. TokenChunker
 ```
 
-**Giải thích:**
+### 5.10.2. Diễn giải thiết kế
 
-1. **ContextBuilder**: Xây dựng context prompt hoàn chỉnh
-2. **RerankerService**: Re-rank kết quả search bằng cross-encoder model
-3. **PromptTemplate**: Quản lý system prompt và user prompt templates
-4. **ConversationManager**: Quản lý lịch sử hội thoại
+1. **SyncController**:
+   - **Lý do**: Entry point cho sync từ Server 1
+   - **Trách nhiệm**: Validate request, route requests
+   - **Phương thức**: `postSync()`
 
-### 5.3.3. Context Building Pipeline
+2. **VectorSyncManager**:
+   - **Lý do**: Orchestrate sync pipeline
+   - **Trách nhiệm**: Process → Embed → Upsert
+   - **Phương thức**: `syncDocuments()`
+
+3. **DocumentProcessor**:
+   - **Lý do**: Processing logic
+   - **Trách nhiệm**: Clean text, chunk documents
+   - **Phương thức**: `process()`, `chunkDocument()`
+
+4. **ChunkingStrategy**:
+   - **Lý do**: Flexible chunking algorithms (Strategy pattern)
+   - **Implementations**: SentenceChunker (chunk theo câu), TokenChunker (chunk theo token)
+
+## 5.11. Biểu đồ hoạt động
 
 ```mermaid
-flowchart TB
-    A[Search Results] --> B[Rerank với Cross-Encoder]
-    B --> C[Filter low scores]
-    C --> D[Get Conversation History]
-    D --> E[Build Prompt từ Template]
-    E --> F{Token > Limit?}
-    F -->|Yes| G[Truncate documents]
-    F -->|No| H[Final Context]
-    G --> H
-    H --> I[Send to LLM]
+flowchart TD
+    Start([Server 1 sync]) --> ValidReq["Validate request"]
+    ValidReq --> StartSync["VectorSyncManager: syncDocuments()"]
+    StartSync --> Loop["For each document"]
+
+    Loop --> Clean["DocumentProcessor: cleanText()"]
+    Clean --> Chunk["DocumentProcessor: chunkDocument()"]
+    Chunk --> Collect["Collect chunks"]
+    Collect --> NextDoc{"More documents?"}
+    NextDoc -->|Có| Loop
+    NextDoc -->|Không| BatchEmbed["EmbeddingService: batchEmbed()"]
+
+    BatchEmbed --> Upsert["VectorStore: upsert()"]
+    Upsert --> CreateResp["Create SyncResponse"]
+    CreateResp --> Return["Return 200 OK"]
+    Return --> End([End])
+
+    style StartSync fill:#E6F3FF
+    style BatchEmbed fill:#FFE6E6
+    style Upsert fill:#E6FFE6
 ```
 
-**Prompt Template Example:**
-```python
-system_prompt = """Bạn là chatbot tư vấn của PTIT.
-Trả lời dựa trên thông tin được cung cấp.
-Nếu không biết, hãy nói rõ."""
+## 5.12. Biểu đồ tuần tự
 
-user_prompt = """
-Context: {retrieved_documents}
-Conversation History: {history}
-Question: {user_query}
+```mermaid
+sequenceDiagram
+    participant S1 as Server 1 (Module 1 - Lớp ảo)
+    participant Ctrl as SyncController
+    participant Sync as VectorSyncManager
+    participant Proc as DocumentProcessor
+    participant Embed as EmbeddingService
+    participant VDB as VectorStore
 
-Answer:
-"""
+    S1->>Ctrl: POST /vector/sync
+    activate Ctrl
+
+    Ctrl->>Sync: syncDocuments(docs, operation)
+    activate Sync
+
+    loop For each document
+        Sync->>Proc: process(document)
+        activate Proc
+        Proc->>Proc: cleanText()
+        Proc->>Proc: chunkDocument()
+        Proc-->>Sync: chunks
+        deactivate Proc
+    end
+
+    Sync->>Embed: batchEmbed(all_chunks)
+    activate Embed
+    Embed-->>Sync: embeddings
+    deactivate Embed
+
+    Sync->>VDB: upsert(chunks, embeddings, metadata)
+    activate VDB
+    VDB-->>Sync: success
+    deactivate VDB
+
+    Sync-->>Ctrl: SyncResponse
+    deactivate Sync
+
+    Ctrl-->>S1: 200 OK
+    deactivate Ctrl
 ```
 
 ---
 
 ## 6. TƯƠNG TÁC VỚI CÁC MODULE KHÁC
 
-### 6.1. Tổng quan tương tác
-
-```mermaid
-sequenceDiagram
-    participant S1 as Server 1 (Training)
-    participant S2 as Server 2 (RAG)
-    participant Auth as Auth Service
-    participant C2 as Client 2 (Customer)
-
-    Note over S1,S2: Document Sync
-    S1->>S2: POST /vector/sync {documents}
-    S2->>S2: Embedding & Index
-    S2-->>S1: 200 OK {synced_count}
-
-    Note over C2,S2: Chat Query
-    C2->>Auth: POST /login
-    Auth-->>C2: {access_token}
-
-    C2->>S2: POST /chat/query {query, token}
-    S2->>Auth: Verify token
-    Auth-->>S2: User validated
-    S2->>S2: RAG Processing
-    S2-->>C2: {answer, sources}
-```
-
-### 6.2. API cần thiết
-
-**Từ Server 1:**
-- `POST /vector/sync`: Đồng bộ documents
-- `POST /model/update`: Thông báo model mới
-
-**Từ Auth Service (Module 3):**
-- `POST /auth/verify`: Verify JWT token
-- `GET /user/{user_id}`: Lấy thông tin user
-
-### 6.3. Biểu đồ triển khai
-
 ```mermaid
 graph TB
-    subgraph "Server 1 (Bạn 1)"
+    subgraph "Server 1 - Training (Module 1 - Lớp ảo)"
         S1[Training API]
         DB1[(Training DB)]
+        S1 --> DB1
     end
 
-    subgraph "Server 2 (Bạn 2)"
-        S2[RAG API - FastAPI]
+    subgraph "Server 2 - RAG (Module 2 - Bạn làm)"
+        S2[RAG API]
         VDB[(ChromaDB)]
-        Redis[(Redis Cache)]
-        PG[(PostgreSQL<br/>Conversations)]
-
+        PG[(PostgreSQL)]
         S2 --> VDB
-        S2 --> Redis
         S2 --> PG
     end
 
-    subgraph "Client (Bạn 3)"
+    subgraph "Client - UI & Auth (Module 3 - Lớp ảo)"
         Auth[Auth Service]
-        C2[Customer UI]
+        Admin[Admin UI]
+        Customer[Customer UI]
         DB2[(User DB)]
         Auth --> DB2
     end
 
-    S1 -->|Sync docs| S2
-    C2 -->|Chat| S2
-    C2 -->|Login| Auth
-    S2 -.->|Verify| Auth
+    S1 -->|POST /vector/sync| S2
+    Customer -->|POST /chat/query| S2
+    Admin -->|GET /vector/stats| S2
+    S2 -.->|Verify token| Auth
 
     style S2 fill:#90EE90
     style VDB fill:#90EE90
-    style Redis fill:#90EE90
     style PG fill:#90EE90
 ```
 
+**Module 2 cần từ Module 1:**
+- `POST /vector/sync`: Nhận documents để đồng bộ
+
+**Module 2 cần từ Module 3:**
+- `POST /auth/verify`: Verify JWT token
+
+**Module 2 cung cấp cho Module 3:**
+- `POST /chat/query`: Chat API
+- `GET /vector/stats`: Admin statistics
+- `GET /conversations/{user_id}`: Lấy lịch sử chat
+
 ---
 
-## 7. ĐÁNH GIÁ & TỐI ƯU HÓA
+## 7. PROMPT ENGINEERING
 
-### 7.1. Metrics theo dõi
+### 7.1. Prompt Template
 
-1. **Performance Metrics:**
-- Response time (p50, p95, p99)
-- Cache hit rate
-- Vector search latency
-- LLM generation time
+```python
+SYSTEM_PROMPT = """Bạn là chatbot tư vấn của PTIT.
+Nhiệm vụ: Trả lời câu hỏi dựa trên thông tin được cung cấp.
+Nguyên tắc:
+- Chỉ trả lời dựa trên context
+- Nếu không có thông tin, nói rõ "Tôi không tìm thấy thông tin này"
+- Trả lời ngắn gọn, chính xác"""
 
-2. **Quality Metrics:**
-- Confidence score distribution
-- User feedback (thumbs up/down)
-- Source relevance score
+USER_PROMPT_TEMPLATE = """
+Context (Tài liệu tìm được):
+{retrieved_documents}
 
-3. **System Metrics:**
-- Vector DB size
-- Embedding cost per query
-- Token usage
+Lịch sử hội thoại:
+{conversation_history}
 
-### 7.2. Chiến lược tối ưu hóa
+Câu hỏi: {user_query}
 
-1. **Caching Strategy:**
-- Cache câu hỏi phổ biến (FAQ)
-- TTL: 1 giờ cho dynamic content, 24 giờ cho static
+Trả lời:"""
+```
 
-2. **Performance:**
-- Batch embedding để giảm API calls
-- Async vector sync
-- Streaming response cho LLM
+### 7.2. Context Building
 
-3. **Quality:**
-- Rerank top 20 results với cross-encoder
-- Dynamic prompt engineering
-- Conversation history summarization
-
-4. **Cost Optimization:**
-- Cache aggressive cho duplicate queries
-- Token limit management
-- Model selection based on query complexity
+```mermaid
+flowchart LR
+    A[Vector Search] --> B[Top 5 documents]
+    B --> C[Get conversation history]
+    C --> D[Format prompt template]
+    D --> E[Send to LLM]
+```
 
 ---
 
 ## 8. KẾT LUẬN
 
+Module 2 là **trung tâm xử lý RAG**:
+
 ### 8.1. Tổng kết
-Module 2 (RAG Chatbot) là trung tâm xử lý của hệ thống:
-- **Server 1**: Nhận documents và model updates
-- **Client 2**: Phục vụ chat queries cho end-users
+- ✅ **3 chức năng**: Query Processing, Vector Management, Document Sync
+- ✅ **Mỗi chức năng có**:
+  - Thiết kế giao diện (Server API + Client UI mockup)
+  - Class diagram chi tiết + diễn giải lý do thiết kế
+  - Activity diagram (luồng xử lý)
+  - Sequence diagram (tương tác với lớp ảo)
+- ✅ **Tương tác module**: Sync với Server 1, Auth/UI với Module 3
+- ✅ **CSDL**: ChromaDB (vectors) + PostgreSQL (conversations)
 
-Thiết kế đơn giản, tập trung vào:
-- **Scalability**: Vector DB scale đến hàng triệu documents
-- **Performance**: Cache + batch processing + streaming
-- **Accuracy**: Reranking + context synthesis + conversation history
+### 8.2. Technology Stack
 
-### 8.2. Công nghệ stack
-- **Backend**: FastAPI (async support)
-- **Vector DB**: ChromaDB (embeddings storage)
-- **Cache**: Redis (query caching)
-- **Database**: PostgreSQL (conversations)
-- **LLM**: OpenAI API / Local LLM
-- **Embedding**: sentence-transformers
+```
+Backend:       FastAPI
+Vector DB:     ChromaDB
+Database:      PostgreSQL
+LLM:           OpenAI API / Local LLM
+Embedding:     sentence-transformers
+```
 
-### 8.3. Công việc tiếp theo
-1. Implement RAG pipeline với FastAPI
-2. Setup ChromaDB + embedding service
-3. Implement caching layer với Redis
-4. Integration testing với Server 1 và Client 2
-5. Performance monitoring & tuning
+### 8.3. Design Patterns
+
+- **MVC**: ChatController, VectorController, SyncController
+- **Facade**: RAGQueryHandler, VectorSyncManager
+- **Strategy**: ChunkingStrategy (SentenceChunker, TokenChunker)
+- **Repository**: ConversationManager
+- **DTO**: ChatResponse, VectorStats, SyncResponse
+- **Value Object**: Query, CollectionInfo
 
 ---
 
