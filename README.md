@@ -91,6 +91,33 @@ CREATE TABLE messages (
 );
 ```
 
+#### Table: `responses`
+```sql
+CREATE TABLE responses (
+    response_id VARCHAR(36) PRIMARY KEY,
+    conversation_id VARCHAR(36) REFERENCES conversations(conversation_id),
+    answer TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### Table: `response_documents` (Bảng trung gian)
+```sql
+CREATE TABLE response_documents (
+    response_id VARCHAR(36) REFERENCES responses(response_id),
+    document_id VARCHAR(255) NOT NULL, -- ID từ ChromaDB
+    relevance_score FLOAT,
+    ranking INT,
+    PRIMARY KEY (response_id, document_id)
+);
+```
+
+**Giải thích bảng trung gian:**
+- `response_id`: FK tới bảng responses
+- `document_id`: ID của document trong ChromaDB
+- `relevance_score`: Điểm tương đồng cosine (0-1)
+- `ranking`: Thứ hạng trong top-k results (1, 2, 3...)
+
 ---
 
 ## 3. THIẾT KẾ LỚP THỰC THỂ
@@ -122,8 +149,16 @@ classDiagram
     }
 
     class ChatResponse {
+        +String responseId
         +String answer
-        +List~Document~ sources
+        +String conversationId
+    }
+
+    class ResponseDocument {
+        +String responseId
+        +String documentId
+        +float relevanceScore
+        +int ranking
     }
 
     class Conversation {
@@ -142,7 +177,8 @@ classDiagram
     Conversation "1" *-- "*" Message
     User "1" -- "*" Query : tạo
     Query "1" -- "1" ChatResponse : sinh ra
-    ChatResponse "*" -- "*" Document : tham chiếu
+    ChatResponse "1" -- "*" ResponseDocument
+    Document "1" -- "*" ResponseDocument
 ```
 
 ### 3.2. Mô tả quan hệ
@@ -165,14 +201,22 @@ classDiagram
    - Mỗi query sinh ra 1 response
    - Response là kết quả trả lời của query
 
-5. **ChatResponse - Document (N-N)**:
-   - Một response tham chiếu nhiều documents (sources)
+5. **ChatResponse - Document (N-N qua ResponseDocument)**:
+   - **Bảng trung gian**: `ResponseDocument`
+   - Một response tham chiếu nhiều documents (top-k retrieval results)
    - Một document có thể được dùng trong nhiều responses
-   - Relationship: Aggregation (documents độc lập tồn tại trong ChromaDB)
+   - Lưu thêm: `relevanceScore` (độ tương đồng), `ranking` (thứ hạng)
+
+6. **ResponseDocument (Association Class)**:
+   - Link giữa ChatResponse và Document
+   - Chứa metadata: điểm relevance, thứ tự ranking
+   - Giúp tracking documents nào được dùng cho response nào
 
 **Luồng dữ liệu:**
 ```
-User → Query → [RAG Pipeline] → Document retrieval → ChatResponse
+User → Query → [RAG Pipeline] → Vector Search → Document
+                                      ↓
+                                ChatResponse ← ResponseDocument (link docs)
                                       ↓
                              Conversation → Message (lưu user query + bot answer)
 ```
