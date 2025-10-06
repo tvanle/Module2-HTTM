@@ -140,6 +140,41 @@ classDiagram
 
     User "1" -- "*" Conversation
     Conversation "1" *-- "*" Message
+    User "1" -- "*" Query : tạo
+    Query "1" -- "1" ChatResponse : sinh ra
+    ChatResponse "*" -- "*" Document : tham chiếu
+```
+
+### 3.2. Mô tả quan hệ
+
+**Quan hệ chính:**
+
+1. **User - Conversation (1-N)**:
+   - Một user có nhiều conversations
+   - Mỗi conversation thuộc về 1 user
+
+2. **Conversation - Message (1-N, Composition)**:
+   - Một conversation chứa nhiều messages
+   - Message không tồn tại độc lập ngoài conversation (composition)
+
+3. **User - Query (1-N)**:
+   - Một user gửi nhiều queries (câu hỏi)
+   - Mỗi query được tạo bởi 1 user
+
+4. **Query - ChatResponse (1-1)**:
+   - Mỗi query sinh ra 1 response
+   - Response là kết quả trả lời của query
+
+5. **ChatResponse - Document (N-N)**:
+   - Một response tham chiếu nhiều documents (sources)
+   - Một document có thể được dùng trong nhiều responses
+   - Relationship: Aggregation (documents độc lập tồn tại trong ChromaDB)
+
+**Luồng dữ liệu:**
+```
+User → Query → [RAG Pipeline] → Document retrieval → ChatResponse
+                                      ↓
+                             Conversation → Message (lưu user query + bot answer)
 ```
 
 ---
