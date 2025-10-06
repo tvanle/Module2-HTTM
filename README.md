@@ -19,9 +19,7 @@ Module 2 đóng vai trò là **trung tâm xử lý RAG (Retrieval-Augmented Gene
 ### 1.2. Chức năng chính
 Module hoạt động như một **RAG Pipeline** bao gồm:
 - **Chức năng 1**: User Management (Quản lý customer users)
-- **Chức năng 2**: RAG Query Processing (Chat với user)
-- **Chức năng 3**: Vector Database Management (Quản lý vector store)
-- **Chức năng 4**: Document Sync (Đồng bộ với Server 1)
+- **Chức năng 2**: RAG System (Chat với user, quản lý vector DB, đồng bộ documents)
 
 ### 1.3. Công nghệ sử dụng
 - **Backend Framework**: FastAPI
@@ -344,6 +342,15 @@ graph TB
 
 ```mermaid
 classDiagram
+    class AdminUserManagementUI {
+        <<Boundary>>
+        +displayUserList()
+        +showCreateUserForm()
+        +showEditUserForm(userId)
+        +confirmDelete(userId)
+        +renderUserTable(users)
+    }
+
     class UserController {
         -UserService userService
         +createUser(request) UserResponse
@@ -353,12 +360,25 @@ classDiagram
         +listUsers(page, limit) UserListResponse
     }
 
+    class CreateUserRequest {
+        +String username
+        +String email
+        +String fullName
+        +validate() bool
+    }
+
+    class UpdateUserRequest {
+        +String fullName
+        +String email
+        +validate() bool
+    }
+
     class UserService {
         -UserRepository userRepository
         +createUser(userData) User
         +getUserById(userId) User
         +updateUser(userId, userData) User
-        +deactivateUser(userId) bool
+        +deleteUser(userId) bool
         +listUsers(page, limit) List~User~
     }
 
@@ -383,65 +403,160 @@ classDiagram
     }
 
     class UserResponse {
-        +User user
+        +bool success
+        +User data
         +toJSON() dict
     }
 
+    class UserListResponse {
+        +bool success
+        +List~User~ data
+        +int total
+        +int page
+        +toJSON() dict
+    }
+
+    AdminUserManagementUI --> UserController : calls API
+    UserController --> CreateUserRequest : receives
+    UserController --> UpdateUserRequest : receives
     UserController --> UserService
     UserService --> UserRepository
     UserService --> User
-    UserController --> UserResponse
+    UserController --> UserResponse : returns
+    UserController --> UserListResponse : returns
     UserResponse --> User
+    UserListResponse --> User
+    AdminUserManagementUI --> UserResponse : displays
+    AdminUserManagementUI --> UserListResponse : displays
 ```
 
 ### 5.2.2. Diễn giải thiết kế
 
 **Tại sao có các lớp này:**
 
-1. **UserController**:
+1. **AdminUserManagementUI** (Boundary - Lớp giao diện):
+   - **Lý do**: Giao diện web để admin quản lý users (Boundary class trong MVC)
+   - **Trách nhiệm**: Render HTML, handle user interactions, gọi API
+   - **Phương thức**:
+     - `displayUserList()` - hiển thị danh sách users
+     - `showCreateUserForm()` - hiển thị form tạo user
+     - `showEditUserForm()` - hiển thị form sửa user
+     - `confirmDelete()` - hiển thị popup xác nhận xóa
+     - `renderUserTable()` - render bảng users
+
+2. **UserController** (Controller):
    - **Lý do**: HTTP layer cho user management (MVC pattern)
-   - **Trách nhiệm**: Handle CRUD requests, validation
+   - **Trách nhiệm**: Handle CRUD requests, route đến service
    - **Phương thức**: `createUser()`, `getUser()`, `updateUser()`, `deleteUser()`, `listUsers()`
 
-2. **UserService**:
+3. **CreateUserRequest** (Request DTO):
+   - **Lý do**: Encapsulate dữ liệu tạo user từ HTTP request
+   - **Trách nhiệm**: Validate input (username, email format, required fields)
+   - **Phương thức**: `validate()` - kiểm tra dữ liệu hợp lệ
+
+3. **UpdateUserRequest** (Request DTO):
+   - **Lý do**: Encapsulate dữ liệu cập nhật user
+   - **Trách nhiệm**: Validate input khi update (email format, optional fields)
+   - **Phương thức**: `validate()` - kiểm tra dữ liệu hợp lệ
+
+4. **UserService** (Service):
    - **Lý do**: Business logic cho user operations (Service pattern)
    - **Trách nhiệm**: Validate business rules, orchestrate operations
-   - **Phương thức**: `createUser()`, `getUserById()`, `updateUser()`, `deactivateUser()`
+   - **Phương thức**: `createUser()`, `getUserById()`, `updateUser()`, `deleteUser()`
 
-3. **UserRepository**:
+5. **UserRepository** (Repository):
    - **Lý do**: Data access layer (Repository pattern)
    - **Trách nhiệm**: CRUD operations với PostgreSQL
    - **Phương thức**: `save()`, `findById()`, `findByUsername()`, `update()`, `delete()`
 
-4. **User** (Entity):
+6. **User** (Entity):
    - **Lý do**: Domain entity
-   - **Trách nhiệm**: Represent user data
+   - **Trách nhiệm**: Represent user data trong domain model
 
-5. **UserResponse** (DTO):
-   - **Lý do**: Standardized API response
-   - **Trách nhiệm**: Serialize user data cho client
+7. **UserResponse** (Response DTO):
+   - **Lý do**: Standardized response cho single user
+   - **Trách nhiệm**: Serialize user data thành JSON cho client
+   - **Phương thức**: `toJSON()` - convert sang JSON format
+
+8. **UserListResponse** (Response DTO):
+   - **Lý do**: Standardized response cho danh sách users
+   - **Trách nhiệm**: Serialize list users + pagination info
+   - **Phương thức**: `toJSON()` - convert sang JSON format
 
 ## 5.3. Biểu đồ hoạt động
+
+### 5.3.1. Tạo User (Create)
 
 ```mermaid
 flowchart TD
     Start([Admin tạo user mới]) --> Validate["UserController: Validate request"]
-    Validate --> CheckDup{"Username/Email đã tồn tại?"}
-    CheckDup -->|Có| Error["Trả về 400 Bad Request"]
-    Error --> End([Kết thúc])
+    Validate --> CheckUser{"Username đã tồn tại?"}
+    CheckUser -->|Có| Error1["Trả về 400 Bad Request"]
+    Error1 --> End([Kết thúc])
 
-    CheckDup -->|Không| CreateUser["UserService: createUser()"]
+    CheckUser -->|Không| CheckEmail{"Email đã tồn tại?"}
+    CheckEmail -->|Có| Error2["Trả về 400 Bad Request"]
+    Error2 --> End
+
+    CheckEmail -->|Không| CreateUser["UserService: createUser()"]
     CreateUser --> GenId["Generate user_id (UUID)"]
     GenId --> Save["UserRepository: save()"]
-    Save --> CreateConv["Tạo conversation mặc định"]
-    CreateConv --> Return["Trả về UserResponse"]
+    Save --> Return["Trả về UserResponse"]
     Return --> End
 
     style Validate fill:#E6F3FF
     style CreateUser fill:#E6FFE6
 ```
 
+### 5.3.2. Cập nhật User (Update)
+
+```mermaid
+flowchart TD
+    Start([Admin cập nhật user]) --> Validate["UserController: Validate request"]
+    Validate --> FindUser["UserService: getUserById()"]
+    FindUser --> UserExists{"User tồn tại?"}
+    UserExists -->|Không| Error1["Trả về 404 Not Found"]
+    Error1 --> End([Kết thúc])
+
+    UserExists -->|Có| EmailChanged{"Email thay đổi?"}
+    EmailChanged -->|Có| CheckEmail["UserRepository: findByEmail()"]
+    CheckEmail --> EmailTaken{"Email đã dùng?"}
+    EmailTaken -->|Có| Error2["Trả về 400 Bad Request"]
+    Error2 --> End
+
+    EmailTaken -->|Không| UpdateUser["UserService: updateUser()"]
+    EmailChanged -->|Không| UpdateUser
+
+    UpdateUser --> SaveUser["UserRepository: update()"]
+    SaveUser --> Return["Trả về UserResponse"]
+    Return --> End
+
+    style Validate fill:#E6F3FF
+    style UpdateUser fill:#E6FFE6
+```
+
+### 5.3.3. Xóa User (Delete)
+
+```mermaid
+flowchart TD
+    Start([Admin xóa user]) --> FindUser["UserService: getUserById()"]
+    FindUser --> UserExists{"User tồn tại?"}
+    UserExists -->|Không| Error["Trả về 404 Not Found"]
+    Error --> End([Kết thúc])
+
+    UserExists -->|Có| DeleteUser["UserService: deleteUser()"]
+    DeleteUser --> SetInactive["Set is_active = false"]
+    SetInactive --> Update["UserRepository: update()"]
+    Update --> Return["Trả về success response"]
+    Return --> End
+
+    style FindUser fill:#E6F3FF
+    style DeleteUser fill:#E6FFE6
+```
+
 ## 5.4. Biểu đồ tuần tự
+
+### 5.4.1. Tạo User (Create)
 
 ```mermaid
 sequenceDiagram
@@ -450,50 +565,164 @@ sequenceDiagram
     participant Ctrl as UserController
     participant Svc as UserService
     participant Repo as UserRepository
-    participant DB as PostgreSQL
 
-    Admin->>AdminUI: Click "Add User" + nhập thông tin
-    AdminUI->>Ctrl: POST /api/v1/users
+    Admin->>AdminUI: 1. Click "Add User" + nhập thông tin
+    AdminUI->>Ctrl: 2. POST /api/v1/users
     activate Ctrl
 
-    Ctrl->>Ctrl: Validate request
-    Ctrl->>Svc: createUser(userData)
+    Ctrl->>Ctrl: 3. Validate request
+    Ctrl->>Svc: 4. createUser(userData)
     activate Svc
 
-    Svc->>Repo: findByUsername(username)
-    Repo->>DB: SELECT * FROM users WHERE username=?
-    DB-->>Repo: null
-    Repo-->>Svc: null (không trùng)
+    Svc->>Repo: 5. findByUsername(username)
+    Repo-->>Svc: 6. null (không trùng)
 
-    Svc->>Repo: findByEmail(email)
-    Repo->>DB: SELECT * FROM users WHERE email=?
-    DB-->>Repo: null
-    Repo-->>Svc: null (không trùng)
+    Svc->>Repo: 7. findByEmail(email)
+    Repo-->>Svc: 8. null (không trùng)
 
-    Svc->>Svc: Generate user_id (UUID)
-    Svc->>Repo: save(user)
-    Repo->>DB: INSERT INTO users VALUES(...)
-    DB-->>Repo: Success
-    Repo-->>Svc: User object
+    Svc->>Svc: 9. Generate user_id (UUID)
+    Svc->>Repo: 10. save(user)
+    Repo-->>Svc: 11. User object
 
-    Svc-->>Ctrl: User
+    Svc-->>Ctrl: 12. User
     deactivate Svc
 
-    Ctrl-->>AdminUI: 201 Created + UserResponse
+    Ctrl-->>AdminUI: 13. 201 Created + UserResponse
     deactivate Ctrl
 
-    AdminUI-->>Admin: Hiển thị "User created successfully"
+    AdminUI-->>Admin: 14. Hiển thị "User created successfully"
 ```
+
+**Mô tả các bước:**
+1. Admin nhập username, email, full_name vào form
+2. Admin UI gửi POST request tới UserController
+3. Controller validate dữ liệu đầu vào (required fields, format)
+4. Controller gọi UserService để xử lý business logic
+5-6. Service kiểm tra username đã tồn tại chưa
+7-8. Service kiểm tra email đã tồn tại chưa
+9. Service tạo UUID cho user_id
+10-11. Repository lưu user vào PostgreSQL
+12. Service trả User object về Controller
+13. Controller wrap trong UserResponse và trả về
+14. UI hiển thị thông báo thành công
+
+### 5.4.2. Cập nhật User (Update)
+
+```mermaid
+sequenceDiagram
+    participant Admin as Admin
+    participant AdminUI as Admin UI (Module 3 - Lớp ảo)
+    participant Ctrl as UserController
+    participant Svc as UserService
+    participant Repo as UserRepository
+
+    Admin->>AdminUI: 1. Click "Edit" + sửa thông tin
+    AdminUI->>Ctrl: 2. PUT /api/v1/users/{user_id}
+    activate Ctrl
+
+    Ctrl->>Ctrl: 3. Validate request
+    Ctrl->>Svc: 4. updateUser(userId, userData)
+    activate Svc
+
+    Svc->>Repo: 5. findById(userId)
+    Repo-->>Svc: 6. User object (existing)
+
+    alt Email thay đổi
+        Svc->>Repo: 7. findByEmail(newEmail)
+        Repo-->>Svc: 8. null (email chưa dùng)
+    end
+
+    Svc->>Svc: 9. Update user properties
+    Svc->>Repo: 10. update(user)
+    Repo-->>Svc: 11. Updated User object
+
+    Svc-->>Ctrl: 12. User
+    deactivate Svc
+
+    Ctrl-->>AdminUI: 13. 200 OK + UserResponse
+    deactivate Ctrl
+
+    AdminUI-->>Admin: 14. Hiển thị "User updated successfully"
+```
+
+**Mô tả các bước:**
+1. Admin click Edit user và sửa thông tin
+2. Admin UI gửi PUT request với user_id
+3. Controller validate dữ liệu (format, allowed fields)
+4. Controller gọi Service để update
+5-6. Service load user hiện tại từ database
+7-8. Nếu email thay đổi, kiểm tra email mới chưa dùng
+9. Service cập nhật các trường được phép (full_name, email)
+10-11. Repository update user trong database
+12. Service trả User object đã update
+13. Controller trả 200 OK + UserResponse
+14. UI hiển thị thông báo cập nhật thành công
+
+### 5.4.3. Xóa User (Delete)
+
+```mermaid
+sequenceDiagram
+    participant Admin as Admin
+    participant AdminUI as Admin UI (Module 3 - Lớp ảo)
+    participant Ctrl as UserController
+    participant Svc as UserService
+    participant Repo as UserRepository
+
+    Admin->>AdminUI: 1. Click "Delete" + xác nhận
+    AdminUI->>Ctrl: 2. DELETE /api/v1/users/{user_id}
+    activate Ctrl
+
+    Ctrl->>Svc: 3. getUserById(userId)
+    activate Svc
+    Svc->>Repo: 4. findById(userId)
+    Repo-->>Svc: 5. User object
+    Svc-->>Ctrl: 6. User
+    deactivate Svc
+
+    Ctrl->>Svc: 7. deleteUser(userId)
+    activate Svc
+
+    Svc->>Repo: 8. findById(userId)
+    Repo-->>Svc: 9. User object
+
+    Svc->>Svc: 10. Set is_active = false
+    Svc->>Repo: 11. update(user)
+    Repo-->>Svc: 12. Updated User
+
+    Svc-->>Ctrl: 13. true
+    deactivate Svc
+
+    Ctrl-->>AdminUI: 14. 200 OK + {"success": true}
+    deactivate Ctrl
+
+    AdminUI-->>Admin: 15. Hiển thị "User deleted successfully"
+```
+
+**Mô tả các bước:**
+1. Admin click Delete và xác nhận trong popup
+2. Admin UI gửi DELETE request với user_id
+3. Controller gọi getUserById() để kiểm tra user tồn tại
+4-5. Repository tìm user trong database
+6. Service trả User object (hoặc throw 404 nếu không tồn tại)
+7. Controller gọi deleteUser() để thực hiện soft delete
+8-9. Service load lại user từ database
+10. Service set is_active = false (soft delete, giữ data)
+11-12. Repository update user trong database
+13. Service trả true (success)
+14. Controller trả 200 OK
+15. UI hiển thị user đã bị xóa thành công
 
 ---
 
-# CHỨC NĂNG 2: RAG QUERY PROCESSING (CHAT VỚI USER)
+# CHỨC NĂNG 2: RAG SYSTEM (CHAT, QUẢN LÝ VECTOR DB, ĐỒNG BỘ DOCUMENTS)
 
 ## 5.5. Thiết kế giao diện
 
 ### 5.5.1. Server Backend API
 
-#### Endpoint: `POST /api/v1/chat/query`
+#### A. Chat API
+
+**Endpoint: `POST /api/v1/chat/query`**
 
 **Request:**
 ```json
@@ -522,200 +751,9 @@ sequenceDiagram
 }
 ```
 
-### 5.5.2. Client UI (Lớp ảo - Module 3)
+#### B. Vector Database Statistics API
 
-**Giao diện chat:**
-
-```
-┌────────────────────────────────────────┐
-│  PTIT Chatbot - Tư vấn sinh viên      │
-├────────────────────────────────────────┤
-│                                        │
-│  User: Học phí CNTT 2025 bao nhiêu?   │
-│                                        │
-│  Bot: Học phí ngành Công nghệ Thông   │
-│       tin năm 2025 là 12.000.000      │
-│       VNĐ/năm...                      │
-│                                        │
-│       📄 Nguồn: tuyen_sinh_2025.pdf   │
-│                                        │
-├────────────────────────────────────────┤
-│  [Nhập câu hỏi...]            [Gửi]  │
-└────────────────────────────────────────┘
-```
-
-**Client → Server 2:**
-```javascript
-POST /api/v1/chat/query
-Headers: { Authorization: "Bearer <token>" }
-Body: { query, user_id, conversation_id }
-```
-
-## 5.6. Thiết kế lớp chi tiết
-
-### 5.6.1. Class Diagram
-
-```mermaid
-classDiagram
-    class ChatController {
-        -RAGQueryHandler ragHandler
-        +postQuery(request) ChatResponse
-        +getConversationHistory(userId, convId) List~Message~
-    }
-
-    class RAGQueryHandler {
-        -VectorStore vectorStore
-        -EmbeddingService embeddingService
-        -LLMService llmService
-        -ContextBuilder contextBuilder
-        -ConversationManager conversationManager
-        +processQuery(query: Query) ChatResponse
-    }
-
-    class Query {
-        +String queryId
-        +String userId
-        +String conversationId
-        +String text
-    }
-
-    class ChatResponse {
-        +String answer
-        +String conversationId
-        +List~Document~ sources
-    }
-
-    class ContextBuilder {
-        -ConversationManager convManager
-        +build(query, documents, convId) String
-    }
-
-    class ConversationManager {
-        -PostgresDB db
-        +saveMessage(convId, message) void
-        +getHistory(convId, limit) List~Message~
-        +createConversation(userId) String
-    }
-
-    ChatController --> RAGQueryHandler
-    RAGQueryHandler --> Query
-    RAGQueryHandler --> ChatResponse
-    RAGQueryHandler --> ContextBuilder
-    RAGQueryHandler --> ConversationManager
-```
-
-### 5.6.2. Diễn giải thiết kế
-
-**Tại sao có các lớp này:**
-
-1. **ChatController**:
-   - **Lý do**: Tách biệt HTTP layer với business logic (MVC pattern)
-   - **Trách nhiệm**: Xử lý HTTP requests, validation
-   - **Phương thức**: `postQuery()`, `getConversationHistory()`
-
-2. **RAGQueryHandler**:
-   - **Lý do**: Điều phối toàn bộ RAG pipeline (Facade pattern)
-   - **Trách nhiệm**: Orchestrate: embed → search → build context → generate
-   - **Phương thức**: `processQuery()` - main workflow
-
-3. **Query** (Value Object):
-   - **Lý do**: Encapsulate thông tin query
-   - **Trách nhiệm**: Validation, type safety
-
-4. **ChatResponse** (DTO):
-   - **Lý do**: Standardized response format
-   - **Trách nhiệm**: Đảm bảo contract với client
-
-5. **ContextBuilder**:
-   - **Lý do**: Xây dựng prompt cho LLM
-   - **Trách nhiệm**: Format documents + conversation history thành prompt
-
-6. **ConversationManager**:
-   - **Lý do**: Quản lý conversation persistence
-   - **Trách nhiệm**: CRUD operations với PostgreSQL
-
-## 5.7. Biểu đồ hoạt động
-
-```mermaid
-flowchart TD
-    Start([User gửi câu hỏi]) --> Validate["ChatController: Validate request"]
-    Validate --> Embed["EmbeddingService: embed query"]
-    Embed --> Search["VectorStore: search (top_k=5)"]
-    Search --> HasResults{"Tìm thấy documents?"}
-
-    HasResults -->|Không| DefaultResp["Trả về: 'Không tìm thấy thông tin'"]
-    DefaultResp --> End([Kết thúc])
-
-    HasResults -->|Có| LoadConv{"Có conversation_id?"}
-    LoadConv -->|Có| GetHistory["ConversationManager: getHistory"]
-    GetHistory --> BuildCtx
-    LoadConv -->|Không| BuildCtx["ContextBuilder: build prompt"]
-
-    BuildCtx --> Generate["LLMService: generate answer"]
-    Generate --> SaveMsg["ConversationManager: saveMessage"]
-    SaveMsg --> Return["Trả về ChatResponse"]
-    Return --> End
-
-    style Embed fill:#E6F3FF
-    style Generate fill:#E6FFE6
-```
-
-## 5.8. Biểu đồ tuần tự
-
-```mermaid
-sequenceDiagram
-    participant User as User
-    participant ClientUI as Client UI (Module 3 - Lớp ảo)
-    participant Controller as ChatController
-    participant RAG as RAGQueryHandler
-    participant Embed as EmbeddingService
-    participant VDB as VectorStore
-    participant Context as ContextBuilder
-    participant Conv as ConversationManager
-    participant LLM as LLMService
-
-    User->>ClientUI: Nhập câu hỏi + click Gửi
-    ClientUI->>Controller: POST /chat/query
-    activate Controller
-
-    Controller->>RAG: processQuery(query)
-    activate RAG
-
-    RAG->>Embed: embed(query.text)
-    Embed-->>RAG: embedding vector
-
-    RAG->>VDB: search(embedding, top_k=5)
-    VDB-->>RAG: 5 documents
-
-    RAG->>Context: build(query, documents, conv_id)
-    activate Context
-    Context->>Conv: getHistory(conv_id, limit=5)
-    Conv-->>Context: conversation history
-    Context->>Context: format prompt
-    Context-->>RAG: final prompt
-    deactivate Context
-
-    RAG->>LLM: generate(prompt)
-    LLM-->>RAG: answer text
-
-    RAG->>Conv: saveMessage(conv_id, user_msg, bot_msg)
-    RAG-->>Controller: ChatResponse
-    deactivate RAG
-
-    Controller-->>ClientUI: 200 OK + JSON
-    deactivate Controller
-    ClientUI-->>User: Hiển thị answer
-```
-
----
-
-# CHỨC NĂNG 3: VECTOR DATABASE MANAGEMENT
-
-## 5.9. Thiết kế giao diện
-
-### 5.9.1. Server Backend API
-
-#### Endpoint: `GET /api/v1/vector/stats`
+**Endpoint: `GET /api/v1/vector/stats`**
 
 **Response:**
 ```json
@@ -738,142 +776,9 @@ sequenceDiagram
 }
 ```
 
-### 5.9.2. Admin Dashboard UI (Lớp ảo - Module 3)
+#### C. Document Sync API (Server-to-Server)
 
-```
-┌──────────────────────────────────────────────┐
-│  PTIT Admin - Vector Database Management    │
-├──────────────────────────────────────────────┤
-│                                              │
-│  📊 Statistics                               │
-│  ├─ Total Documents: 10,245                 │
-│  └─ Collections: 1                          │
-│                                              │
-│  📁 Categories                               │
-│  ├─ Tuyển sinh: 3,420 (33%)                │
-│  ├─ Học phí: 1,250 (12%)                   │
-│  └─ Đào tạo: 5,575 (55%)                   │
-│                                              │
-│  ⚙️ Actions                                  │
-│  [View Documents] [Search] [Export]         │
-└──────────────────────────────────────────────┘
-```
-
-## 5.10. Thiết kế lớp chi tiết
-
-### 5.10.1. Class Diagram
-
-```mermaid
-classDiagram
-    class VectorController {
-        -VectorStatsService statsService
-        +getStats() VectorStatsResponse
-        +searchVectors(query) SearchResults
-    }
-
-    class VectorStatsService {
-        -VectorStore vectorStore
-        +getStatistics() VectorStats
-        +getCategoryBreakdown() Map
-    }
-
-    class VectorStats {
-        +int totalDocuments
-        +List~CollectionInfo~ collections
-    }
-
-    class CollectionInfo {
-        +String name
-        +int count
-        +Map~String,int~ categoryBreakdown
-    }
-
-    VectorController --> VectorStatsService
-    VectorStatsService --> VectorStore
-    VectorStatsService --> VectorStats
-    VectorStats "1" *-- "*" CollectionInfo
-```
-
-### 5.10.2. Diễn giải thiết kế
-
-1. **VectorController**:
-   - **Lý do**: Expose management APIs cho admin
-   - **Trách nhiệm**: Handle HTTP requests
-   - **Phương thức**: `getStats()`, `searchVectors()`
-
-2. **VectorStatsService**:
-   - **Lý do**: Business logic thu thập statistics
-   - **Trách nhiệm**: Aggregate data từ VectorStore
-   - **Phương thức**: `getStatistics()`, `getCategoryBreakdown()`
-
-3. **VectorStats** (DTO):
-   - **Lý do**: Structured stats data
-   - **Trách nhiệm**: Serialize cho API response
-
-4. **CollectionInfo**:
-   - **Lý do**: Represent collection metadata
-   - **Trách nhiệm**: Chi tiết từng collection
-
-## 5.11. Biểu đồ hoạt động
-
-```mermaid
-flowchart TD
-    Start([Admin request stats]) --> GetStats["VectorStatsService: getStatistics()"]
-    GetStats --> QueryVDB["VectorStore: getCollectionInfo()"]
-    QueryVDB --> CountDocs["Count documents"]
-    CountDocs --> GetCat["Aggregate by category"]
-    GetCat --> CreateResp["Create VectorStatsResponse"]
-    CreateResp --> Return["Return JSON"]
-    Return --> End([End])
-
-    style GetStats fill:#E6F3FF
-```
-
-## 5.12. Biểu đồ tuần tự
-
-```mermaid
-sequenceDiagram
-    participant Admin as Admin
-    participant AdminUI as Dashboard (Module 3 - Lớp ảo)
-    participant Ctrl as VectorController
-    participant Stats as VectorStatsService
-    participant VDB as VectorStore
-
-    Admin->>AdminUI: Click "View Stats"
-    AdminUI->>Ctrl: GET /vector/stats
-    activate Ctrl
-
-    Ctrl->>Stats: getStatistics()
-    activate Stats
-
-    Stats->>VDB: getCollectionInfo()
-    VDB-->>Stats: metadata
-
-    Stats->>VDB: countDocuments()
-    VDB-->>Stats: 10245
-
-    Stats->>VDB: aggregateByMetadata("category")
-    VDB-->>Stats: category breakdown
-
-    Stats-->>Ctrl: VectorStats
-    deactivate Stats
-
-    Ctrl-->>AdminUI: 200 OK + JSON
-    deactivate Ctrl
-
-    AdminUI->>AdminUI: Render charts
-    AdminUI-->>Admin: Display
-```
-
----
-
-# CHỨC NĂNG 4: DOCUMENT SYNC (ĐỒNG BỘ VỚI SERVER 1)
-
-## 5.13. Thiết kế giao diện
-
-### 5.13.1. Server Backend API
-
-#### Endpoint: `POST /api/v1/vector/sync`
+**Endpoint: `POST /api/v1/vector/sync`**
 
 **Request từ Server 1:**
 ```json
@@ -905,171 +810,703 @@ sequenceDiagram
 }
 ```
 
-### 5.13.2. Server 1 Integration (Lớp ảo)
+### 5.5.2. Client UI (Lớp ảo - Module 3)
 
-**Workflow:**
+#### A. Customer Chat UI
+
+**Giao diện chat:**
 
 ```
-Server 1                      Server 2
-────────                      ────────
-1. Admin upload docs
-2. Process documents
-3. Trigger sync      ──────>  1. Validate request
-                              2. Process + chunk
-                              3. Generate embeddings
-                              4. Upsert ChromaDB
-                    <──────   5. Return result
-4. Handle response
+┌────────────────────────────────────────┐
+│  PTIT Chatbot - Tư vấn sinh viên      │
+├────────────────────────────────────────┤
+│                                        │
+│  User: Học phí CNTT 2025 bao nhiêu?   │
+│                                        │
+│  Bot: Học phí ngành Công nghệ Thông   │
+│       tin năm 2025 là 12.000.000      │
+│       VNĐ/năm...                      │
+│                                        │
+│       📄 Nguồn: tuyen_sinh_2025.pdf   │
+│                                        │
+├────────────────────────────────────────┤
+│  [Nhập câu hỏi...]            [Gửi]  │
+└────────────────────────────────────────┘
 ```
 
-## 5.14. Thiết kế lớp chi tiết
+#### B. Admin Vector Dashboard UI
 
-### 5.14.1. Class Diagram
+**Giao diện dashboard:**
+
+```
+┌──────────────────────────────────────────────┐
+│  PTIT Admin - Vector Database Dashboard    │
+├──────────────────────────────────────────────┤
+│                                              │
+│  📊 Statistics                               │
+│  ├─ Total Documents: 10,245                 │
+│  └─ Collections: 1                          │
+│                                              │
+│  📁 Categories                               │
+│  ├─ Tuyển sinh: 3,420 (33%)                │
+│  ├─ Học phí: 1,250 (12%)                   │
+│  └─ Đào tạo: 5,575 (55%)                   │
+│                                              │
+│  ⚙️ Actions                                  │
+│  [View Documents] [Refresh Stats]           │
+└──────────────────────────────────────────────┘
+```
+
+## 5.6. Thiết kế lớp chi tiết
+
+### 5.6.1. Class Diagram
 
 ```mermaid
 classDiagram
+    %% ========== CHAT FUNCTIONALITY ==========
+    class CustomerChatUI {
+        <<Boundary>>
+        +displayChatInterface()
+        +sendMessage(query)
+        +displayAnswer(response)
+        +displaySources(sources)
+        +loadHistory(conversationId)
+        +renderChatBubble(message)
+    }
+
+    class ChatController {
+        -RAGQueryHandler ragHandler
+        +postQuery(request) ChatResponse
+        +getConversationHistory(userId, convId) ConversationHistoryResponse
+    }
+
+    class QueryRequest {
+        +String query
+        +String userId
+        +String conversationId
+        +validate() bool
+    }
+
+    class RAGQueryHandler {
+        -VectorStore vectorStore
+        -EmbeddingService embeddingService
+        -LLMService llmService
+        -ContextBuilder contextBuilder
+        -ConversationManager conversationManager
+        +processQuery(query: Query) ChatResponse
+    }
+
+    class Query {
+        +String queryId
+        +String userId
+        +String conversationId
+        +String text
+    }
+
+    class ChatResponse {
+        +bool success
+        +String answer
+        +String conversationId
+        +List~SourceDocument~ sources
+        +toJSON() dict
+    }
+
+    class SourceDocument {
+        +String docId
+        +String content
+        +String source
+        +float relevanceScore
+    }
+
+    class ConversationHistoryResponse {
+        +bool success
+        +List~Message~ messages
+        +String conversationId
+        +toJSON() dict
+    }
+
+    class ContextBuilder {
+        -ConversationManager convManager
+        +build(query, documents, convId) String
+    }
+
+    class ConversationManager {
+        -PostgresDB db
+        +saveMessage(convId, message) void
+        +getHistory(convId, limit) List~Message~
+        +createConversation(userId) String
+    }
+
+    %% ========== VECTOR STATS FUNCTIONALITY ==========
+    class AdminVectorDashboardUI {
+        <<Boundary>>
+        +displayDashboard()
+        +showCollectionStats()
+        +refreshStats()
+        +renderStatsTable(stats)
+        +searchVectors(query)
+    }
+
+    class VectorController {
+        -VectorStatsService statsService
+        +getStats() VectorStatsResponse
+        +postSearchVectors(request) VectorSearchResponse
+    }
+
+    class VectorStatsService {
+        -VectorStore vectorStore
+        +getStatistics() VectorStats
+        +searchVectors(query, topK) List~Document~
+    }
+
+    class VectorStats {
+        +int totalDocuments
+        +int totalCollections
+        +List~CollectionInfo~ collections
+        +toJSON() dict
+    }
+
+    class CollectionInfo {
+        +String name
+        +int documentCount
+        +int dimension
+    }
+
+    class VectorStatsResponse {
+        +bool success
+        +VectorStats stats
+        +toJSON() dict
+    }
+
+    class VectorSearchResponse {
+        +bool success
+        +List~Document~ results
+        +toJSON() dict
+    }
+
+    %% ========== DOCUMENT SYNC FUNCTIONALITY ==========
     class SyncController {
         -VectorSyncManager syncManager
         +postSync(request) SyncResponse
     }
 
+    class SyncRequest {
+        +List~String~ documentUrls
+        +String collectionName
+        +dict metadata
+        +validate() bool
+    }
+
     class VectorSyncManager {
         -VectorStore vectorStore
-        -EmbeddingService embeddingService
         -DocumentProcessor processor
-        +syncDocuments(docs, operation) SyncResult
-    }
-
-    class SyncRequest {
-        +String source
-        +String operation
-        +List~Document~ documents
-    }
-
-    class SyncResponse {
-        +bool success
-        +int syncedCount
-        +int totalVectors
-        +int syncTimeMs
+        -EmbeddingService embeddingService
+        +syncDocuments(urls, collection) SyncResult
     }
 
     class DocumentProcessor {
-        -ChunkingStrategy chunker
-        +process(document) List~Chunk~
-        +cleanText(text) String
-        +chunkDocument(text) List~Chunk~
+        -ChunkingStrategy strategy
+        +processDocument(url) Document
+        +splitIntoChunks(document) List~Chunk~
     }
 
     class ChunkingStrategy {
         <<interface>>
-        +chunk(text, chunkSize, overlap) List~String~
+        +chunk(text, chunkSize) List~String~
     }
 
     class SentenceChunker {
-        +chunk(text, chunkSize, overlap) List~String~
+        +chunk(text, chunkSize) List~String~
     }
 
     class TokenChunker {
-        +chunk(text, chunkSize, overlap) List~String~
+        +chunk(text, chunkSize) List~String~
     }
 
+    class SyncResponse {
+        +bool success
+        +int documentsProcessed
+        +int chunksCreated
+        +List~String~ errors
+        +toJSON() dict
+    }
+
+    %% ========== SHARED COMPONENTS ==========
+    class VectorStore {
+        -ChromaDB client
+        +search(embedding, topK) List~Document~
+        +insert(documents, embeddings) void
+        +getStats() dict
+        +getCollections() List~String~
+    }
+
+    class EmbeddingService {
+        -SentenceTransformer model
+        +embed(text) List~float~
+        +batchEmbed(texts) List~List~float~~
+    }
+
+    class LLMService {
+        -OpenAI client
+        +generate(prompt) String
+    }
+
+    %% ========== RELATIONSHIPS - CHAT ==========
+    CustomerChatUI --> ChatController : calls API
+    ChatController --> QueryRequest : receives
+    ChatController --> RAGQueryHandler
+    RAGQueryHandler --> Query
+    RAGQueryHandler --> ChatResponse : returns
+    ChatController --> ChatResponse : returns
+    ChatController --> ConversationHistoryResponse : returns
+    ChatResponse --> SourceDocument
+    RAGQueryHandler --> ContextBuilder
+    RAGQueryHandler --> ConversationManager
+    CustomerChatUI --> ChatResponse : displays
+    CustomerChatUI --> ConversationHistoryResponse : displays
+    RAGQueryHandler --> VectorStore
+    RAGQueryHandler --> EmbeddingService
+    RAGQueryHandler --> LLMService
+
+    %% ========== RELATIONSHIPS - VECTOR STATS ==========
+    AdminVectorDashboardUI --> VectorController : calls API
+    VectorController --> VectorStatsService
+    VectorStatsService --> VectorStore
+    VectorStatsService --> VectorStats : returns
+    VectorStats --> CollectionInfo
+    VectorController --> VectorStatsResponse : returns
+    VectorController --> VectorSearchResponse : returns
+    AdminVectorDashboardUI --> VectorStatsResponse : displays
+    VectorStatsService --> EmbeddingService
+
+    %% ========== RELATIONSHIPS - DOCUMENT SYNC ==========
+    SyncController --> SyncRequest : receives
     SyncController --> VectorSyncManager
     VectorSyncManager --> DocumentProcessor
+    VectorSyncManager --> VectorStore
+    VectorSyncManager --> EmbeddingService
     DocumentProcessor --> ChunkingStrategy
-    ChunkingStrategy <|.. SentenceChunker
-    ChunkingStrategy <|.. TokenChunker
+    ChunkingStrategy <|.. SentenceChunker : implements
+    ChunkingStrategy <|.. TokenChunker : implements
+    SyncController --> SyncResponse : returns
 ```
 
-### 5.14.2. Diễn giải thiết kế
+### 5.6.2. Diễn giải thiết kế
 
-1. **SyncController**:
-   - **Lý do**: Entry point cho sync từ Server 1
-   - **Trách nhiệm**: Validate request, route requests
-   - **Phương thức**: `postSync()`
+**Tại sao có các lớp này:**
 
-2. **VectorSyncManager**:
-   - **Lý do**: Orchestrate sync pipeline
-   - **Trách nhiệm**: Process → Embed → Upsert
-   - **Phương thức**: `syncDocuments()`
+#### A. CHAT FUNCTIONALITY
 
-3. **DocumentProcessor**:
-   - **Lý do**: Processing logic
-   - **Trách nhiệm**: Clean text, chunk documents
-   - **Phương thức**: `process()`, `chunkDocument()`
+1. **CustomerChatUI** (Boundary - Lớp giao diện):
+   - **Lý do**: Giao diện web chat cho customer (Boundary class)
+   - **Trách nhiệm**: Render chat interface, handle user input, display responses
+   - **Phương thức**:
+     - `displayChatInterface()` - hiển thị giao diện chat
+     - `sendMessage()` - gửi câu hỏi đến server
+     - `displayAnswer()` - hiển thị câu trả lời từ bot
+     - `displaySources()` - hiển thị nguồn tài liệu tham khảo
+     - `loadHistory()` - load lịch sử chat
+     - `renderChatBubble()` - render từng message bubble
 
-4. **ChunkingStrategy**:
-   - **Lý do**: Flexible chunking algorithms (Strategy pattern)
-   - **Implementations**: SentenceChunker (chunk theo câu), TokenChunker (chunk theo token)
+2. **ChatController** (Controller):
+   - **Lý do**: HTTP layer cho chat operations (MVC pattern)
+   - **Trách nhiệm**: Handle chat requests, route đến RAG handler
+   - **Phương thức**: `postQuery()`, `getConversationHistory()`
 
-## 5.15. Biểu đồ hoạt động
+3. **QueryRequest** (Request DTO):
+   - **Lý do**: Encapsulate chat query từ HTTP request
+   - **Trách nhiệm**: Validate input (query text required, userId, conversationId)
+   - **Phương thức**: `validate()` - kiểm tra query không empty
+
+4. **RAGQueryHandler** (Facade):
+   - **Lý do**: Điều phối toàn bộ RAG pipeline (Facade pattern)
+   - **Trách nhiệm**: Orchestrate: embed → search → build context → generate
+   - **Phương thức**: `processQuery()` - main RAG workflow
+
+5. **Query** (Value Object):
+   - **Lý do**: Domain object đại diện cho câu hỏi
+   - **Trách nhiệm**: Encapsulate query information, immutable
+
+6. **ChatResponse** (Response DTO):
+   - **Lý do**: Standardized response cho chat query
+   - **Trách nhiệm**: Serialize answer + sources thành JSON
+   - **Phương thức**: `toJSON()` - convert sang JSON format
+
+7. **SourceDocument** (DTO):
+   - **Lý do**: Represent document source trong response
+   - **Trách nhiệm**: Chứa thông tin document được retrieve (id, content, source file, score)
+
+8. **ConversationHistoryResponse** (Response DTO):
+   - **Lý do**: Standardized response cho lịch sử hội thoại
+   - **Trách nhiệm**: Serialize conversation history thành JSON
+   - **Phương thức**: `toJSON()`
+
+9. **ContextBuilder** (Builder):
+   - **Lý do**: Build prompt cho LLM (Builder pattern)
+   - **Trách nhiệm**: Format documents + conversation history → final prompt
+   - **Phương thức**: `build()` - tạo prompt string
+
+10. **ConversationManager** (Repository):
+    - **Lý do**: Quản lý conversation persistence (Repository pattern)
+    - **Trách nhiệm**: CRUD operations cho conversations với PostgreSQL
+    - **Phương thức**: `saveMessage()`, `getHistory()`, `createConversation()`
+
+#### B. VECTOR STATS FUNCTIONALITY
+
+11. **AdminVectorDashboardUI** (Boundary - Lớp giao diện):
+    - **Lý do**: Giao diện admin dashboard cho thống kê vector DB (Boundary class)
+    - **Trách nhiệm**: Hiển thị thống kê, search vectors, refresh data
+    - **Phương thức**:
+      - `displayDashboard()` - hiển thị dashboard
+      - `showCollectionStats()` - hiển thị stats từng collection
+      - `refreshStats()` - làm mới dữ liệu
+      - `renderStatsTable()` - render bảng thống kê
+      - `searchVectors()` - tìm kiếm vectors
+
+12. **VectorController** (Controller):
+    - **Lý do**: HTTP layer cho vector stats operations (MVC pattern)
+    - **Trách nhiệm**: Handle stats requests, route đến service
+    - **Phương thức**: `getStats()`, `postSearchVectors()`
+
+13. **VectorStatsService** (Service):
+    - **Lý do**: Business logic cho việc lấy thống kê vector DB
+    - **Trách nhiệm**: Gọi VectorStore để lấy stats, search vectors
+    - **Phương thức**: `getStatistics()`, `searchVectors()`
+
+14. **VectorStats** (Value Object):
+    - **Lý do**: Encapsulate thông tin thống kê vector DB
+    - **Trách nhiệm**: Chứa total documents, collections, collection info
+    - **Phương thức**: `toJSON()`
+
+15. **CollectionInfo** (Value Object):
+    - **Lý do**: Represent thông tin từng collection
+    - **Trách nhiệm**: Chứa name, document count, dimension
+
+16. **VectorStatsResponse** (Response DTO):
+    - **Lý do**: Standardized response cho stats request
+    - **Trách nhiệm**: Serialize stats thành JSON
+    - **Phương thức**: `toJSON()`
+
+17. **VectorSearchResponse** (Response DTO):
+    - **Lý do**: Standardized response cho vector search
+    - **Trách nhiệm**: Serialize search results thành JSON
+    - **Phương thức**: `toJSON()`
+
+#### C. DOCUMENT SYNC FUNCTIONALITY
+
+18. **SyncController** (Controller):
+    - **Lý do**: HTTP layer cho document sync operations (MVC pattern)
+    - **Trách nhiệm**: Handle sync requests từ Server 1, route đến manager
+    - **Phương thức**: `postSync()`
+
+19. **SyncRequest** (Request DTO):
+    - **Lý do**: Encapsulate document sync request từ Server 1
+    - **Trách nhiệm**: Validate input (documentUrls, collectionName)
+    - **Phương thức**: `validate()`
+
+20. **VectorSyncManager** (Facade):
+    - **Lý do**: Điều phối toàn bộ document sync pipeline (Facade pattern)
+    - **Trách nhiệm**: Orchestrate: process → chunk → embed → insert
+    - **Phương thức**: `syncDocuments()`
+
+21. **DocumentProcessor** (Service):
+    - **Lý do**: Xử lý documents (load, clean, chunk)
+    - **Trách nhiệm**: Load document từ URL, split thành chunks
+    - **Phương thức**: `processDocument()`, `splitIntoChunks()`
+
+22. **ChunkingStrategy** (Strategy Interface):
+    - **Lý do**: Strategy pattern cho việc chunking documents
+    - **Trách nhiệm**: Define interface cho các chiến lược chunking khác nhau
+    - **Phương thức**: `chunk()`
+
+23. **SentenceChunker** (Strategy Implementation):
+    - **Lý do**: Chunking theo câu (sentence-based)
+    - **Trách nhiệm**: Split text theo sentence boundaries
+    - **Phương thức**: `chunk()`
+
+24. **TokenChunker** (Strategy Implementation):
+    - **Lý do**: Chunking theo token count
+    - **Trách nhiệm**: Split text theo số tokens với overlap
+    - **Phương thức**: `chunk()`
+
+25. **SyncResponse** (Response DTO):
+    - **Lý do**: Standardized response cho sync request
+    - **Trách nhiệm**: Serialize sync results (documents processed, chunks created, errors)
+    - **Phương thức**: `toJSON()`
+
+#### D. SHARED COMPONENTS
+
+26. **VectorStore** (Repository):
+    - **Lý do**: Abstraction layer cho ChromaDB (Repository pattern)
+    - **Trách nhiệm**: CRUD operations với vector database
+    - **Phương thức**: `search()`, `insert()`, `getStats()`, `getCollections()`
+
+27. **EmbeddingService** (Service):
+    - **Lý do**: Service cho việc tạo embeddings
+    - **Trách nhiệm**: Convert text → vector embeddings (768-dim)
+    - **Phương thức**: `embed()`, `batchEmbed()`
+
+28. **LLMService** (Service):
+    - **Lý do**: Service cho việc gọi LLM (OpenAI hoặc Local)
+    - **Trách nhiệm**: Generate answer từ prompt
+    - **Phương thức**: `generate()`
+
+## 5.7. Biểu đồ hoạt động
+
+### 5.7.1. Chat Query Processing
 
 ```mermaid
 flowchart TD
-    Start([Server 1 sync]) --> ValidReq["Validate request"]
-    ValidReq --> StartSync["VectorSyncManager: syncDocuments()"]
-    StartSync --> Loop["For each document"]
+    Start([User gửi câu hỏi]) --> Validate["ChatController: Validate request"]
+    Validate --> Embed["EmbeddingService: embed query"]
+    Embed --> Search["VectorStore: search (top_k=5)"]
+    Search --> HasResults{"Tìm thấy documents?"}
 
-    Loop --> Clean["DocumentProcessor: cleanText()"]
-    Clean --> Chunk["DocumentProcessor: chunkDocument()"]
-    Chunk --> Collect["Collect chunks"]
-    Collect --> NextDoc{"More documents?"}
-    NextDoc -->|Có| Loop
-    NextDoc -->|Không| BatchEmbed["EmbeddingService: batchEmbed()"]
+    HasResults -->|Không| DefaultResp["Trả về: 'Không tìm thấy thông tin'"]
+    DefaultResp --> End([Kết thúc])
 
-    BatchEmbed --> Upsert["VectorStore: upsert()"]
-    Upsert --> CreateResp["Create SyncResponse"]
-    CreateResp --> Return["Return 200 OK"]
-    Return --> End([End])
+    HasResults -->|Có| LoadConv{"Có conversation_id?"}
+    LoadConv -->|Có| GetHistory["ConversationManager: getHistory"]
+    GetHistory --> BuildCtx
+    LoadConv -->|Không| BuildCtx["ContextBuilder: build prompt"]
 
-    style StartSync fill:#E6F3FF
-    style BatchEmbed fill:#FFE6E6
-    style Upsert fill:#E6FFE6
+    BuildCtx --> Generate["LLMService: generate answer"]
+    Generate --> SaveMsg["ConversationManager: saveMessage"]
+    SaveMsg --> Return["Trả về ChatResponse"]
+    Return --> End
+
+    style Embed fill:#E6F3FF
+    style Generate fill:#E6FFE6
 ```
 
-## 5.16. Biểu đồ tuần tự
+### 5.7.2. Vector Stats Retrieval
+
+```mermaid
+flowchart TD
+    Start([Admin yêu cầu stats]) --> Validate["VectorController: Validate request"]
+    Validate --> GetStats["VectorStatsService: getStatistics()"]
+    GetStats --> Query["VectorStore: getStats()"]
+    Query --> GetColls["VectorStore: getCollections()"]
+    GetColls --> Loop["Loop qua từng collection"]
+
+    Loop --> GetCount["Lấy document count"]
+    GetCount --> GetDim["Lấy dimension"]
+    GetDim --> NextColl{"Còn collection?"}
+
+    NextColl -->|Có| Loop
+    NextColl -->|Không| Build["Build VectorStats object"]
+    Build --> Return["Trả về VectorStatsResponse"]
+    Return --> End([Kết thúc])
+
+    style Query fill:#E6F3FF
+    style Build fill:#E6FFE6
+```
+
+### 5.7.3. Document Sync Processing
+
+```mermaid
+flowchart TD
+    Start([Server 1 gửi sync request]) --> Validate["SyncController: Validate request"]
+    Validate --> Loop["Loop qua từng document URL"]
+
+    Loop --> Download["DocumentProcessor: processDocument(url)"]
+    Download --> DownloadOK{"Download thành công?"}
+
+    DownloadOK -->|Không| LogError["Log error"]
+    LogError --> NextDoc
+
+    DownloadOK -->|Có| Chunk["DocumentProcessor: splitIntoChunks()"]
+    Chunk --> Strategy["ChunkingStrategy: chunk()"]
+    Strategy --> Embed["EmbeddingService: batchEmbed(chunks)"]
+    Embed --> Insert["VectorStore: insert(chunks, embeddings)"]
+    Insert --> NextDoc{"Còn document?"}
+
+    NextDoc -->|Có| Loop
+    NextDoc -->|Không| BuildResp["Build SyncResponse"]
+    BuildResp --> Return["Trả về kết quả"]
+    Return --> End([Kết thúc])
+
+    style Embed fill:#E6F3FF
+    style Insert fill:#E6FFE6
+```
+
+## 5.8. Biểu đồ tuần tự
+
+### 5.8.1. Chat Query Processing
 
 ```mermaid
 sequenceDiagram
-    participant S1 as Server 1 (Module 1 - Lớp ảo)
-    participant Ctrl as SyncController
-    participant Sync as VectorSyncManager
-    participant Proc as DocumentProcessor
+    participant User as User
+    participant ClientUI as Client UI (Module 3 - Lớp ảo)
+    participant Controller as ChatController
+    participant RAG as RAGQueryHandler
+    participant Embed as EmbeddingService
+    participant VDB as VectorStore
+    participant Context as ContextBuilder
+    participant Conv as ConversationManager
+    participant LLM as LLMService
+
+    User->>ClientUI: 1. Nhập câu hỏi + click Gửi
+    ClientUI->>Controller: 2. POST /chat/query
+    activate Controller
+
+    Controller->>RAG: 3. processQuery(query)
+    activate RAG
+
+    RAG->>Embed: 4. embed(query.text)
+    Embed-->>RAG: 5. embedding vector [768 dims]
+
+    RAG->>VDB: 6. search(embedding, top_k=5)
+    VDB-->>RAG: 7. Top-5 documents + scores
+
+    RAG->>Context: 8. build(query, documents, conv_id)
+    activate Context
+    Context->>Conv: 9. getHistory(conv_id, limit=5)
+    Conv-->>Context: 10. Last 5 messages
+    Context->>Context: 11. Format prompt template
+    Context-->>RAG: 12. Final prompt string
+    deactivate Context
+
+    RAG->>LLM: 13. generate(prompt)
+    LLM-->>RAG: 14. Answer text
+
+    RAG->>Conv: 15. saveMessage(user_msg, bot_msg)
+    Conv-->>RAG: 16. Success
+
+    RAG-->>Controller: 17. ChatResponse + sources
+    deactivate RAG
+
+    Controller-->>ClientUI: 18. 200 OK + JSON
+    deactivate Controller
+    ClientUI-->>User: 19. Hiển thị answer + nguồn
+```
+
+**Mô tả các bước:**
+1. User nhập câu hỏi và nhấn nút Gửi
+2. Client UI gửi POST request tới ChatController
+3. Controller gọi RAGQueryHandler để xử lý RAG pipeline
+4-5. Embedding service convert query thành vector 768 chiều
+6-7. Vector store tìm kiếm 5 documents gần nhất (cosine similarity)
+8. ContextBuilder nhận query + documents + conversation_id
+9-10. ContextBuilder load 5 messages cuối từ ConversationManager
+11. ContextBuilder format: system prompt + context + history + query
+12. Trả final prompt string cho RAGQueryHandler
+13-14. LLM service generate answer từ prompt
+15-16. ConversationManager lưu cả user message và bot message
+17. RAGQueryHandler trả ChatResponse (answer + sources)
+18. Controller trả 200 OK với JSON response
+19. Client UI hiển thị answer và nguồn tài liệu tham khảo
+
+### 5.8.2. Vector Stats Retrieval
+
+```mermaid
+sequenceDiagram
+    participant Admin as Admin
+    participant AdminUI as Admin Dashboard UI (Module 3 - Lớp ảo)
+    participant Controller as VectorController
+    participant Service as VectorStatsService
+    participant VDB as VectorStore
+
+    Admin->>AdminUI: 1. Truy cập dashboard + click Refresh
+    AdminUI->>Controller: 2. GET /vector/stats
+    activate Controller
+
+    Controller->>Service: 3. getStatistics()
+    activate Service
+
+    Service->>VDB: 4. getStats()
+    VDB-->>Service: 5. Total documents count
+
+    Service->>VDB: 6. getCollections()
+    VDB-->>Service: 7. List collection names
+
+    loop Từng collection
+        Service->>VDB: 8. getCollectionInfo(name)
+        VDB-->>Service: 9. Count + dimension
+    end
+
+    Service->>Service: 10. Build VectorStats object
+    Service-->>Controller: 11. VectorStats
+    deactivate Service
+
+    Controller->>Controller: 12. Build VectorStatsResponse
+    Controller-->>AdminUI: 13. 200 OK + JSON
+    deactivate Controller
+    AdminUI-->>Admin: 14. Hiển thị stats table
+```
+
+**Mô tả các bước:**
+1. Admin truy cập dashboard và click nút Refresh để làm mới stats
+2. Admin UI gửi GET request tới VectorController
+3. Controller gọi VectorStatsService để lấy thống kê
+4-5. Service lấy tổng số documents từ VectorStore
+6-7. Service lấy danh sách tên collections
+8-9. Loop qua từng collection, lấy document count và dimension
+10. Service build VectorStats object với tất cả thông tin
+11. Service trả VectorStats về Controller
+12. Controller tạo VectorStatsResponse (DTO)
+13. Controller trả 200 OK với JSON response
+14. Admin UI render bảng thống kê với số liệu real-time
+
+### 5.8.3. Document Sync Processing
+
+```mermaid
+sequenceDiagram
+    participant Server1 as Server 1 (Module 1)
+    participant Controller as SyncController
+    participant Manager as VectorSyncManager
+    participant Processor as DocumentProcessor
+    participant Strategy as ChunkingStrategy
     participant Embed as EmbeddingService
     participant VDB as VectorStore
 
-    S1->>Ctrl: POST /vector/sync
-    activate Ctrl
+    Server1->>Controller: 1. POST /vector/sync + documentUrls
+    activate Controller
 
-    Ctrl->>Sync: syncDocuments(docs, operation)
-    activate Sync
+    Controller->>Controller: 2. Validate SyncRequest
+    Controller->>Manager: 3. syncDocuments(urls, collection)
+    activate Manager
 
-    loop For each document
-        Sync->>Proc: process(document)
-        activate Proc
-        Proc->>Proc: cleanText()
-        Proc->>Proc: chunkDocument()
-        Proc-->>Sync: chunks
-        deactivate Proc
+    loop Từng document URL
+        Manager->>Processor: 4. processDocument(url)
+        activate Processor
+        Processor->>Processor: 5. Download document content
+        Processor->>Strategy: 6. chunk(text, chunkSize=512)
+        Strategy-->>Processor: 7. List of chunks
+        deactivate Processor
+        Processor-->>Manager: 8. Document + chunks
+
+        Manager->>Embed: 9. batchEmbed(chunks)
+        Embed-->>Manager: 10. List of embeddings
+
+        Manager->>VDB: 11. insert(chunks, embeddings, metadata)
+        VDB-->>Manager: 12. Success
     end
 
-    Sync->>Embed: batchEmbed(all_chunks)
-    activate Embed
-    Embed-->>Sync: embeddings
-    deactivate Embed
+    Manager->>Manager: 13. Build SyncResponse (count, errors)
+    Manager-->>Controller: 14. SyncResponse
+    deactivate Manager
 
-    Sync->>VDB: upsert(chunks, embeddings, metadata)
-    activate VDB
-    VDB-->>Sync: success
-    deactivate VDB
-
-    Sync-->>Ctrl: SyncResponse
-    deactivate Sync
-
-    Ctrl-->>S1: 200 OK
-    deactivate Ctrl
+    Controller-->>Server1: 15. 200 OK + JSON
+    deactivate Controller
 ```
 
+**Mô tả các bước:**
+1. Server 1 gửi POST request với danh sách document URLs cần sync
+2. Controller validate SyncRequest (urls không empty, collection name valid)
+3. Controller gọi VectorSyncManager để xử lý sync pipeline
+4. Manager loop qua từng URL, gọi DocumentProcessor
+5. Processor download nội dung document từ URL
+6-7. Processor dùng ChunkingStrategy để split text thành chunks (512 tokens)
+8. Processor trả document đã xử lý và danh sách chunks
+9-10. Manager gọi EmbeddingService để tạo embeddings cho tất cả chunks (batch)
+11-12. Manager insert chunks + embeddings + metadata vào VectorStore (ChromaDB)
+13. Manager build SyncResponse với số documents processed, chunks created, errors
+14. Manager trả SyncResponse về Controller
+15. Controller trả 200 OK với JSON response về Server 1
+
 ---
+
 
 ## 6. TƯƠNG TÁC VỚI CÁC MODULE KHÁC
 
@@ -1161,14 +1598,21 @@ flowchart LR
 Module 2 là **trung tâm xử lý RAG**:
 
 ### 8.1. Tổng kết
-- ✅ **4 chức năng**: User Management, Query Processing, Vector Management, Document Sync
+- ✅ **2 chức năng chính**:
+  - **User Management**: Quản lý customer users (CRUD operations)
+  - **RAG System**: Tích hợp 3 chức năng con (Chat với user, Quản lý vector DB, Đồng bộ documents)
 - ✅ **Mỗi chức năng có**:
-  - Thiết kế giao diện (Server API + Client UI mockup)
+  - Thiết kế giao diện (Server API + Client UI mockup với Boundary classes)
   - Class diagram chi tiết + diễn giải lý do thiết kế
-  - Activity diagram (luồng xử lý)
-  - Sequence diagram (tương tác với lớp ảo)
-- ✅ **Tương tác module**: Sync với Server 1, Auth/UI với Module 3
-- ✅ **CSDL**: ChromaDB (vectors) + PostgreSQL (conversations)
+  - Activity diagram (luồng xử lý chi tiết cho từng operation)
+  - Sequence diagram với đánh số bước + mô tả (không có chi tiết database queries)
+- ✅ **Tương tác module**:
+  - Nhận document sync từ Server 1
+  - Cung cấp Chat API và Vector Stats cho Module 3
+  - Verify JWT token với Auth service (Module 3)
+- ✅ **CSDL**:
+  - ChromaDB (vector embeddings)
+  - PostgreSQL (users, conversations, messages, responses, response_documents)
 
 ### 8.2. Technology Stack
 
