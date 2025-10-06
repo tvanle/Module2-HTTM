@@ -18,9 +18,10 @@ Module 2 đóng vai trò là **trung tâm xử lý RAG (Retrieval-Augmented Gene
 
 ### 1.2. Chức năng chính
 Module hoạt động như một **RAG Pipeline** bao gồm:
-- **Chức năng 1**: RAG Query Processing (Chat với user)
-- **Chức năng 2**: Vector Database Management (Quản lý vector store)
-- **Chức năng 3**: Document Sync (Đồng bộ với Server 1)
+- **Chức năng 1**: User Management (Quản lý customer users)
+- **Chức năng 2**: RAG Query Processing (Chat với user)
+- **Chức năng 3**: Vector Database Management (Quản lý vector store)
+- **Chức năng 4**: Document Sync (Đồng bộ với Server 1)
 
 ### 1.3. Công nghệ sử dụng
 - **Backend Framework**: FastAPI
@@ -55,13 +56,26 @@ Module hoạt động như một **RAG Pipeline** bao gồm:
 - `metadata`: Thông tin nguồn gốc, danh mục
 - `embedding`: Vector đại diện ngữ nghĩa
 
-### 2.2. Conversation History Schema (PostgreSQL)
+### 2.2. User & Conversation Schema (PostgreSQL)
+
+#### Table: `users`
+```sql
+CREATE TABLE users (
+    user_id VARCHAR(36) PRIMARY KEY,
+    username VARCHAR(100) UNIQUE NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    full_name VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_active BOOLEAN DEFAULT TRUE
+);
+```
 
 #### Table: `conversations`
 ```sql
 CREATE TABLE conversations (
     conversation_id VARCHAR(36) PRIMARY KEY,
-    user_id VARCHAR(36) NOT NULL,
+    user_id VARCHAR(36) NOT NULL REFERENCES users(user_id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
@@ -85,6 +99,15 @@ CREATE TABLE messages (
 
 ```mermaid
 classDiagram
+    class User {
+        +String userId
+        +String username
+        +String email
+        +String fullName
+        +DateTime createdAt
+        +boolean isActive
+    }
+
     class Document {
         +String id
         +String content
@@ -115,6 +138,7 @@ classDiagram
         +String content
     }
 
+    User "1" -- "*" Conversation
     Conversation "1" *-- "*" Message
 ```
 
@@ -145,11 +169,250 @@ graph TB
 
 ---
 
-# CHỨC NĂNG 1: RAG QUERY PROCESSING (CHAT VỚI USER)
+# CHỨC NĂNG 1: USER MANAGEMENT (QUẢN LÝ CUSTOMER USERS)
 
 ## 5.1. Thiết kế giao diện
 
 ### 5.1.1. Server Backend API
+
+#### Endpoint: `POST /api/v1/users` (Tạo user mới)
+
+**Request:**
+```json
+{
+    "username": "nguyenvana",
+    "email": "nguyenvana@ptit.edu.vn",
+    "full_name": "Nguyễn Văn A"
+}
+```
+
+**Response:**
+```json
+{
+    "success": true,
+    "data": {
+        "user_id": "user_123",
+        "username": "nguyenvana",
+        "email": "nguyenvana@ptit.edu.vn",
+        "full_name": "Nguyễn Văn A",
+        "created_at": "2025-01-15T10:30:00Z",
+        "is_active": true
+    }
+}
+```
+
+#### Endpoint: `GET /api/v1/users/{user_id}` (Lấy thông tin user)
+
+**Response:**
+```json
+{
+    "success": true,
+    "data": {
+        "user_id": "user_123",
+        "username": "nguyenvana",
+        "email": "nguyenvana@ptit.edu.vn",
+        "full_name": "Nguyễn Văn A",
+        "created_at": "2025-01-15T10:30:00Z",
+        "is_active": true
+    }
+}
+```
+
+#### Endpoint: `PUT /api/v1/users/{user_id}` (Cập nhật user)
+
+**Request:**
+```json
+{
+    "full_name": "Nguyễn Văn A (Updated)",
+    "email": "nguyenvana_new@ptit.edu.vn"
+}
+```
+
+#### Endpoint: `DELETE /api/v1/users/{user_id}` (Xóa/vô hiệu hóa user)
+
+**Response:**
+```json
+{
+    "success": true,
+    "message": "User deactivated successfully"
+}
+```
+
+### 5.1.2. Admin UI (Lớp ảo - Module 3)
+
+**Giao diện quản lý users:**
+
+```
+┌──────────────────────────────────────────────┐
+│  PTIT Admin - User Management               │
+├──────────────────────────────────────────────┤
+│                                              │
+│  👥 Users List                               │
+│  ┌────────────────────────────────────────┐ │
+│  │ ID      Username    Email       Status │ │
+│  │ user_1  nguyenvana  nva@ptit... Active │ │
+│  │ user_2  tranthib    ttb@ptit... Active │ │
+│  │ user_3  levanc      lvc@ptit... Inactive│ │
+│  └────────────────────────────────────────┘ │
+│                                              │
+│  [Add User] [Search] [Export]               │
+└──────────────────────────────────────────────┘
+```
+
+## 5.2. Thiết kế lớp chi tiết
+
+### 5.2.1. Class Diagram
+
+```mermaid
+classDiagram
+    class UserController {
+        -UserService userService
+        +createUser(request) UserResponse
+        +getUser(userId) UserResponse
+        +updateUser(userId, request) UserResponse
+        +deleteUser(userId) Response
+        +listUsers(page, limit) UserListResponse
+    }
+
+    class UserService {
+        -UserRepository userRepository
+        +createUser(userData) User
+        +getUserById(userId) User
+        +updateUser(userId, userData) User
+        +deactivateUser(userId) bool
+        +listUsers(page, limit) List~User~
+    }
+
+    class UserRepository {
+        -PostgresDB db
+        +save(user) User
+        +findById(userId) User
+        +findByUsername(username) User
+        +findByEmail(email) User
+        +update(user) User
+        +delete(userId) bool
+    }
+
+    class User {
+        +String userId
+        +String username
+        +String email
+        +String fullName
+        +DateTime createdAt
+        +DateTime updatedAt
+        +boolean isActive
+    }
+
+    class UserResponse {
+        +User user
+        +toJSON() dict
+    }
+
+    UserController --> UserService
+    UserService --> UserRepository
+    UserService --> User
+    UserController --> UserResponse
+    UserResponse --> User
+```
+
+### 5.2.2. Diễn giải thiết kế
+
+**Tại sao có các lớp này:**
+
+1. **UserController**:
+   - **Lý do**: HTTP layer cho user management (MVC pattern)
+   - **Trách nhiệm**: Handle CRUD requests, validation
+   - **Phương thức**: `createUser()`, `getUser()`, `updateUser()`, `deleteUser()`, `listUsers()`
+
+2. **UserService**:
+   - **Lý do**: Business logic cho user operations (Service pattern)
+   - **Trách nhiệm**: Validate business rules, orchestrate operations
+   - **Phương thức**: `createUser()`, `getUserById()`, `updateUser()`, `deactivateUser()`
+
+3. **UserRepository**:
+   - **Lý do**: Data access layer (Repository pattern)
+   - **Trách nhiệm**: CRUD operations với PostgreSQL
+   - **Phương thức**: `save()`, `findById()`, `findByUsername()`, `update()`, `delete()`
+
+4. **User** (Entity):
+   - **Lý do**: Domain entity
+   - **Trách nhiệm**: Represent user data
+
+5. **UserResponse** (DTO):
+   - **Lý do**: Standardized API response
+   - **Trách nhiệm**: Serialize user data cho client
+
+## 5.3. Biểu đồ hoạt động
+
+```mermaid
+flowchart TD
+    Start([Admin tạo user mới]) --> Validate["UserController: Validate request"]
+    Validate --> CheckDup{"Username/Email đã tồn tại?"}
+    CheckDup -->|Có| Error["Trả về 400 Bad Request"]
+    Error --> End([Kết thúc])
+
+    CheckDup -->|Không| CreateUser["UserService: createUser()"]
+    CreateUser --> GenId["Generate user_id (UUID)"]
+    GenId --> Save["UserRepository: save()"]
+    Save --> CreateConv["Tạo conversation mặc định"]
+    CreateConv --> Return["Trả về UserResponse"]
+    Return --> End
+
+    style Validate fill:#E6F3FF
+    style CreateUser fill:#E6FFE6
+```
+
+## 5.4. Biểu đồ tuần tự
+
+```mermaid
+sequenceDiagram
+    participant Admin as Admin
+    participant AdminUI as Admin UI (Module 3 - Lớp ảo)
+    participant Ctrl as UserController
+    participant Svc as UserService
+    participant Repo as UserRepository
+    participant DB as PostgreSQL
+
+    Admin->>AdminUI: Click "Add User" + nhập thông tin
+    AdminUI->>Ctrl: POST /api/v1/users
+    activate Ctrl
+
+    Ctrl->>Ctrl: Validate request
+    Ctrl->>Svc: createUser(userData)
+    activate Svc
+
+    Svc->>Repo: findByUsername(username)
+    Repo->>DB: SELECT * FROM users WHERE username=?
+    DB-->>Repo: null
+    Repo-->>Svc: null (không trùng)
+
+    Svc->>Repo: findByEmail(email)
+    Repo->>DB: SELECT * FROM users WHERE email=?
+    DB-->>Repo: null
+    Repo-->>Svc: null (không trùng)
+
+    Svc->>Svc: Generate user_id (UUID)
+    Svc->>Repo: save(user)
+    Repo->>DB: INSERT INTO users VALUES(...)
+    DB-->>Repo: Success
+    Repo-->>Svc: User object
+
+    Svc-->>Ctrl: User
+    deactivate Svc
+
+    Ctrl-->>AdminUI: 201 Created + UserResponse
+    deactivate Ctrl
+
+    AdminUI-->>Admin: Hiển thị "User created successfully"
+```
+
+---
+
+# CHỨC NĂNG 2: RAG QUERY PROCESSING (CHAT VỚI USER)
+
+## 5.5. Thiết kế giao diện
+
+### 5.5.1. Server Backend API
 
 #### Endpoint: `POST /api/v1/chat/query`
 
@@ -180,7 +443,7 @@ graph TB
 }
 ```
 
-### 5.1.2. Client UI (Lớp ảo - Module 3)
+### 5.5.2. Client UI (Lớp ảo - Module 3)
 
 **Giao diện chat:**
 
@@ -209,9 +472,9 @@ Headers: { Authorization: "Bearer <token>" }
 Body: { query, user_id, conversation_id }
 ```
 
-## 5.2. Thiết kế lớp chi tiết
+## 5.6. Thiết kế lớp chi tiết
 
-### 5.2.1. Class Diagram
+### 5.6.1. Class Diagram
 
 ```mermaid
 classDiagram
@@ -262,7 +525,7 @@ classDiagram
     RAGQueryHandler --> ConversationManager
 ```
 
-### 5.2.2. Diễn giải thiết kế
+### 5.6.2. Diễn giải thiết kế
 
 **Tại sao có các lớp này:**
 
@@ -292,7 +555,7 @@ classDiagram
    - **Lý do**: Quản lý conversation persistence
    - **Trách nhiệm**: CRUD operations với PostgreSQL
 
-## 5.3. Biểu đồ hoạt động
+## 5.7. Biểu đồ hoạt động
 
 ```mermaid
 flowchart TD
@@ -318,7 +581,7 @@ flowchart TD
     style Generate fill:#E6FFE6
 ```
 
-## 5.4. Biểu đồ tuần tự
+## 5.8. Biểu đồ tuần tự
 
 ```mermaid
 sequenceDiagram
@@ -367,11 +630,11 @@ sequenceDiagram
 
 ---
 
-# CHỨC NĂNG 2: VECTOR DATABASE MANAGEMENT
+# CHỨC NĂNG 3: VECTOR DATABASE MANAGEMENT
 
-## 5.5. Thiết kế giao diện
+## 5.9. Thiết kế giao diện
 
-### 5.5.1. Server Backend API
+### 5.9.1. Server Backend API
 
 #### Endpoint: `GET /api/v1/vector/stats`
 
@@ -396,7 +659,7 @@ sequenceDiagram
 }
 ```
 
-### 5.5.2. Admin Dashboard UI (Lớp ảo - Module 3)
+### 5.9.2. Admin Dashboard UI (Lớp ảo - Module 3)
 
 ```
 ┌──────────────────────────────────────────────┐
@@ -417,7 +680,9 @@ sequenceDiagram
 └──────────────────────────────────────────────┘
 ```
 
-## 5.6. Thiết kế lớp chi tiết
+## 5.10. Thiết kế lớp chi tiết
+
+### 5.10.1. Class Diagram
 
 ```mermaid
 classDiagram
@@ -450,7 +715,7 @@ classDiagram
     VectorStats "1" *-- "*" CollectionInfo
 ```
 
-### 5.6.2. Diễn giải thiết kế
+### 5.10.2. Diễn giải thiết kế
 
 1. **VectorController**:
    - **Lý do**: Expose management APIs cho admin
@@ -470,7 +735,7 @@ classDiagram
    - **Lý do**: Represent collection metadata
    - **Trách nhiệm**: Chi tiết từng collection
 
-## 5.7. Biểu đồ hoạt động
+## 5.11. Biểu đồ hoạt động
 
 ```mermaid
 flowchart TD
@@ -485,7 +750,7 @@ flowchart TD
     style GetStats fill:#E6F3FF
 ```
 
-## 5.8. Biểu đồ tuần tự
+## 5.12. Biểu đồ tuần tự
 
 ```mermaid
 sequenceDiagram
@@ -523,11 +788,11 @@ sequenceDiagram
 
 ---
 
-# CHỨC NĂNG 3: DOCUMENT SYNC (ĐỒNG BỘ VỚI SERVER 1)
+# CHỨC NĂNG 4: DOCUMENT SYNC (ĐỒNG BỘ VỚI SERVER 1)
 
-## 5.9. Thiết kế giao diện
+## 5.13. Thiết kế giao diện
 
-### 5.9.1. Server Backend API
+### 5.13.1. Server Backend API
 
 #### Endpoint: `POST /api/v1/vector/sync`
 
@@ -561,7 +826,7 @@ sequenceDiagram
 }
 ```
 
-### 5.9.2. Server 1 Integration (Lớp ảo)
+### 5.13.2. Server 1 Integration (Lớp ảo)
 
 **Workflow:**
 
@@ -578,7 +843,9 @@ Server 1                      Server 2
 4. Handle response
 ```
 
-## 5.10. Thiết kế lớp chi tiết
+## 5.14. Thiết kế lớp chi tiết
+
+### 5.14.1. Class Diagram
 
 ```mermaid
 classDiagram
@@ -634,7 +901,7 @@ classDiagram
     ChunkingStrategy <|.. TokenChunker
 ```
 
-### 5.10.2. Diễn giải thiết kế
+### 5.14.2. Diễn giải thiết kế
 
 1. **SyncController**:
    - **Lý do**: Entry point cho sync từ Server 1
@@ -655,7 +922,7 @@ classDiagram
    - **Lý do**: Flexible chunking algorithms (Strategy pattern)
    - **Implementations**: SentenceChunker (chunk theo câu), TokenChunker (chunk theo token)
 
-## 5.11. Biểu đồ hoạt động
+## 5.15. Biểu đồ hoạt động
 
 ```mermaid
 flowchart TD
@@ -680,7 +947,7 @@ flowchart TD
     style Upsert fill:#E6FFE6
 ```
 
-## 5.12. Biểu đồ tuần tự
+## 5.16. Biểu đồ tuần tự
 
 ```mermaid
 sequenceDiagram
@@ -815,7 +1082,7 @@ flowchart LR
 Module 2 là **trung tâm xử lý RAG**:
 
 ### 8.1. Tổng kết
-- ✅ **3 chức năng**: Query Processing, Vector Management, Document Sync
+- ✅ **4 chức năng**: User Management, Query Processing, Vector Management, Document Sync
 - ✅ **Mỗi chức năng có**:
   - Thiết kế giao diện (Server API + Client UI mockup)
   - Class diagram chi tiết + diễn giải lý do thiết kế
