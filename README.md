@@ -1,1639 +1,1424 @@
-# BÁO CÁO THIẾT KẾ MODULE 2: CHATBOT APPLICATION & RAG MODULE
+# BÁO CÁO THIẾT KẾ MODULE CHAT - PHÍA CLIENT
 
-**Sinh viên thực hiện:** [Tên bạn]
-**Mã sinh viên:** [MSSV]
-**Lớp:** [Tên lớp]
+## 1. TỔNG QUAN HỆ THỐNG
+
+### 1.1. Mô tả
+Module Chat là phần frontend của hệ thống AMI RAG-Powered Chatbot, cho phép người dùng tương tác với AI Assistant thông qua giao diện web. Module này xử lý việc gửi tin nhắn, hiển thị phản hồi, quản lý phiên chat và cấu hình các tham số hội thoại.
+
+### 1.2. Công nghệ sử dụng
+- **Frontend Framework**: React 18 + TypeScript
+- **Build Tool**: Vite
+- **State Management**: Zustand
+- **HTTP Client**: Axios
+- **UI Components**: Custom Components + Material-UI
+- **Styling**: CSS Modules
+
+### 1.3. Kiến trúc tổng quan
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Frontend Layer                        │
+│  ┌──────────┐  ┌──────────┐  ┌─────────────────────┐  │
+│  │   Pages  │  │Components│  │  State Management    │  │
+│  │          │  │          │  │      (Zustand)       │  │
+│  └─────┬────┘  └────┬─────┘  └──────────┬──────────┘  │
+│        │            │                    │              │
+│        └────────────┴────────────────────┘              │
+│                     │                                    │
+│            ┌────────▼────────┐                          │
+│            │   API Client    │                          │
+│            │    (Axios)      │                          │
+│            └────────┬────────┘                          │
+└─────────────────────┼──────────────────────────────────┘
+                      │ HTTP/REST
+                      ▼
+          ┌───────────────────────┐
+          │   Backend API         │
+          │   (FastAPI)           │
+          │   Port: 6008          │
+          └───────────────────────┘
+```
 
 ---
 
-## 1. TỔNG QUAN MODULE
+## 2. THIẾT KẾ CƠ SỞ DỮ LIỆU (MongoDB Schema)
 
-### 1.1. Vai trò trong hệ thống
-Module 2 đóng vai trò là **trung tâm xử lý RAG (Retrieval-Augmented Generation)** và cung cấp API chatbot cho người dùng cuối. Module này:
-- Nhận câu hỏi từ Client 2 (Customer)
-- Tìm kiếm thông tin liên quan từ vector database
-- Tổng hợp context và sinh câu trả lời qua LLM
-- Đồng bộ documents từ Server 1
-- Trả kết quả về Client 2
+### 2.1. Collection: chat_sessions
+```typescript
+interface ChatSessionInDB {
+  _id: ObjectId;                    // ID phiên chat (được map thành id)
+  user_id: string;                  // ID người dùng sở hữu
+  title: string;                    // Tiêu đề phiên chat (mặc định: "New Conversation")
+  summary?: string;                 // Tóm tắt nội dung (tối đa 2000 ký tự)
+  message_count: number;            // Số lượng tin nhắn trong phiên
+  last_message_at?: Date;           // Thời gian tin nhắn cuối cùng
+  created_at: Date;                 // Thời gian tạo
+  updated_at: Date;                 // Thời gian cập nhật
+  is_archived: boolean;             // Trạng thái lưu trữ
+  is_deleted: boolean;              // Trạng thái xóa mềm
+  metadata: Record<string, any>;    // Metadata mở rộng
+  tags: string[];                   // Tags phân loại
+}
+```
 
-### 1.2. Chức năng chính
-Module hoạt động như một **RAG Pipeline** bao gồm:
-- **Chức năng 1**: User Management (Quản lý customer users)
-- **Chức năng 2**: RAG System (Chat với user, quản lý vector DB, đồng bộ documents)
+**Indexes:**
+- `user_id` (ascending) - Tìm kiếm phiên theo người dùng
+- `created_at` (descending) - Sắp xếp theo thời gian tạo
+- `is_deleted` (ascending) - Filter phiên đã xóa
+- `{ user_id: 1, is_deleted: 1, created_at: -1 }` - Composite index
 
-### 1.3. Công nghệ sử dụng
-- **Backend Framework**: FastAPI
-- **Vector Database**: ChromaDB
-- **LLM**: OpenAI API / Local LLM
-- **Embedding Model**: sentence-transformers
-- **Database**: PostgreSQL (conversations)
+### 2.2. Collection: chat_messages
+```typescript
+interface ChatMessageInDB {
+  _id: ObjectId;                    // ID tin nhắn (được map thành id)
+  session_id: string;               // ID phiên chat (foreign key)
+  role: 'system' | 'user' | 'assistant';  // Vai trò người gửi
+  content: string;                  // Nội dung tin nhắn
+  attachments: FileAttachment[];    // Danh sách file đính kèm
+  metadata: Record<string, any>;    // Metadata (thinking_mode, rag_enabled, etc.)
+  created_at: Date;                 // Thời gian tạo
+  edited_at?: Date;                 // Thời gian chỉnh sửa
+  is_deleted: boolean;              // Trạng thái xóa mềm
+}
+
+interface FileAttachment {
+  file_id: string;                  // ID file trong MinIO
+  type: string;                     // image | document | audio | video
+  url: string;                      // URL truy cập file
+  thumbnail_url?: string;           // URL thumbnail (nếu là ảnh)
+  filename: string;                 // Tên file gốc
+  size: number;                     // Kích thước (bytes)
+  mime_type: string;                // MIME type
+  width?: number;                   // Chiều rộng (ảnh)
+  height?: number;                  // Chiều cao (ảnh)
+  generated: boolean;               // File được tạo bởi AI
+  generation_prompt?: string;       // Prompt tạo ảnh
+  vision_analysis?: Record<string, any>; // Phân tích Vision AI
+}
+```
+
+**Indexes:**
+- `session_id` (ascending) - Tìm tin nhắn theo phiên
+- `created_at` (ascending) - Sắp xếp theo thời gian
+- `{ session_id: 1, is_deleted: 1, created_at: 1 }` - Composite index
+
+### 2.3. Collection: users (liên quan)
+```typescript
+interface UserInDB {
+  _id: ObjectId;                    // ID người dùng
+  username: string;                 // Tên đăng nhập (unique)
+  email: string;                    // Email (unique)
+  full_name?: string;               // Tên đầy đủ
+  hashed_password: string;          // Mật khẩu đã hash
+  role: 'admin' | 'user';           // Vai trò
+  is_active: boolean;               // Trạng thái hoạt động
+  created_at: Date;                 // Thời gian tạo
+  updated_at: Date;                 // Thời gian cập nhật
+  last_login?: Date;                // Lần đăng nhập cuối
+}
+```
+
+**Indexes:**
+- `username` (unique) - Tìm kiếm người dùng
+- `email` (unique) - Tìm kiếm theo email
 
 ---
 
-## 2. THIẾT KẾ CƠ SỞ DỮ LIỆU
+## 3. THIẾT KẾ LỚP THỰC THỂ (Entity Classes)
 
-### 2.1. Vector Database Schema (ChromaDB)
+### 3.1. Domain Models (Frontend)
 
-#### Collection: `ptit_knowledge_base`
-```python
-{
-    "id": "doc_001",
-    "document": "Nội dung văn bản gốc",
-    "metadata": {
-        "source": "ptit_tuyen_sinh.pdf",
-        "category": "tuyen_sinh",
-        "chunk_index": 0
+```typescript
+// ============ Chat Session Entity ============
+export interface ChatSession {
+  id: string;                       // ID phiên chat
+  user_id: string;                  // ID người dùng
+  title: string;                    // Tiêu đề
+  summary?: string;                 // Tóm tắt
+  message_count: number;            // Số lượng tin nhắn
+  created_at: string;               // ISO datetime
+  updated_at: string;               // ISO datetime
+  last_message_at: string;          // ISO datetime
+  is_archived: boolean;             // Đã lưu trữ
+  is_deleted: boolean;              // Đã xóa
+}
+
+// ============ Chat Message Entity ============
+export interface ChatMessage {
+  id: string;                       // ID tin nhắn
+  session_id: string;               // ID phiên chat
+  role: 'user' | 'assistant';       // Vai trò
+  content: string;                  // Nội dung
+  metadata?: MessageMetadata;       // Metadata
+  created_at: string;               // ISO datetime
+  edited_at?: string;               // ISO datetime
+  is_deleted: boolean;              // Đã xóa
+}
+
+export interface MessageMetadata {
+  thinking_mode?: 'fast' | 'balance' | 'thinking';
+  rag_enabled?: boolean;            // RAG có được bật không
+  web_search_enabled?: boolean;     // Web search có được bật không
+  sources?: DocumentSource[];       // Nguồn tài liệu RAG
+  web_sources?: WebSource[];        // Nguồn web search
+  conversation_turns?: number;      // Số lượt hội thoại
+}
+
+export interface DocumentSource {
+  content: string;                  // Nội dung trích xuất
+  metadata: {
+    file_name?: string;             // Tên file nguồn
+    page?: number;                  // Số trang
+    chunk_index?: number;           // Chỉ số chunk
+    collection?: string;            // Collection
+  };
+  score: number;                    // Điểm similarity
+}
+
+export interface WebSource {
+  url: string;                      // URL nguồn
+  title: string;                    // Tiêu đề trang
+  content: string;                  // Nội dung trích xuất
+  snippet: string;                  // Đoạn trích
+}
+
+// ============ Request/Response Models ============
+export interface Message {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatRequest {
+  messages: Message[];              // Lịch sử hội thoại
+  thinking_mode?: 'fast' | 'balance' | 'thinking';
+  system_prompt?: string;           // System prompt tùy chỉnh
+  rag_config?: RAGConfig;           // Cấu hình RAG
+  web_search_config?: WebSearchConfig; // Cấu hình web search
+  generation_config?: GenerationConfig; // Cấu hình generation
+  collection?: string;              // Collection để search
+  stream?: boolean;                 // Streaming mode
+  session_id?: string;              // ID phiên chat (để lưu lịch sử)
+  auto_generate_title?: boolean;    // Tự động tạo tiêu đề
+}
+
+export interface RAGConfig {
+  enabled: boolean;                 // Bật/tắt RAG
+  top_k: number;                    // Số lượng documents trả về (mặc định: 5)
+  similarity_threshold: number;     // Ngưỡng similarity (0.0-1.0)
+  include_sources: boolean;         // Trả về nguồn tài liệu
+  metadata_filter?: Record<string, unknown>; // Filter metadata
+}
+
+export interface WebSearchConfig {
+  enabled: boolean;                 // Bật/tắt web search
+  max_results: number;              // Số kết quả tối đa (mặc định: 5)
+  timeout: number;                  // Timeout (ms)
+}
+
+export interface GenerationConfig {
+  temperature: number;              // 0.0-2.0 (mặc định: 0.7)
+  max_tokens?: number;              // Số tokens tối đa
+  top_p: number;                    // Nucleus sampling (mặc định: 1.0)
+  frequency_penalty: number;        // 0.0-2.0 (mặc định: 0)
+  presence_penalty: number;         // 0.0-2.0 (mặc định: 0)
+}
+
+export interface ChatResponse {
+  message: Message;                 // Phản hồi từ AI
+  sources?: DocumentSource[];       // Nguồn RAG
+  web_sources?: WebSource[];        // Nguồn web
+  metadata: ResponseMetadata;       // Metadata phản hồi
+  session_id?: string;              // ID phiên chat (nếu đã lưu)
+}
+
+export interface ResponseMetadata {
+  thinking_mode: string;            // Thinking mode đã dùng
+  collection: string;               // Collection đã search
+  conversation_turns: number;       // Số lượt hội thoại
+  rag_enabled: boolean;             // RAG đã bật
+  web_search_enabled: boolean;      // Web search đã bật
+}
+```
+
+### 3.2. State Management Models
+
+```typescript
+// ============ Chat Store State ============
+export interface ChatState {
+  // Session Management
+  currentSession: ChatSession | null;      // Phiên chat hiện tại
+  sessions: ChatSession[];                 // Danh sách phiên chat
+
+  // Message Management
+  currentMessages: ChatMessage[];          // Tin nhắn của phiên hiện tại
+
+  // UI State
+  loading: boolean;                        // Đang load
+  error: string | null;                    // Thông báo lỗi
+  isUploadingFile: boolean;                // Đang upload file
+
+  // Configuration
+  config: ChatConfig;                      // Cấu hình chat
+
+  // Actions
+  setCurrentSession: (session: ChatSession | null) => void;
+  setSessions: (sessions: ChatSession[]) => void;
+  addMessage: (message: ChatMessage) => void;
+  setCurrentMessages: (messages: ChatMessage[]) => void;
+  setLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+  updateConfig: (config: Partial<ChatConfig>) => void;
+  setIsUploadingFile: (loading: boolean) => void;
+  clearState: () => void;
+}
+
+export interface ChatConfig {
+  thinkingMode: 'fast' | 'balance' | 'thinking';  // Mặc định: 'balance'
+  enableRAG: boolean;                      // Mặc định: true
+  enableWebSearch: boolean;                // Mặc định: false
+  temperature: number;                     // Mặc định: 0.7
+  maxTokens?: number;                      // Tùy chọn
+  topK: number;                            // Mặc định: 5
+  similarityThreshold: number;             // Mặc định: 0.0
+  collection: string;                      // Mặc định: 'default'
+}
+```
+
+---
+
+## 4. BIỂU ĐỒ LỚP CHI TIẾT (Class Diagram)
+
+```mermaid
+classDiagram
+    %% ========== API Client Layer ==========
+    class APIClient {
+        -client: AxiosInstance
+        +generateChat(request: ChatRequest): Promise~ChatResponse~
+        +createSession(title?: string): Promise~ChatSession~
+        +listSessions(skip, limit, isArchived?, search?): Promise~SessionList~
+        +getSession(sessionId, includeMessages): Promise~ChatSessionWithMessages~
+        +updateSession(sessionId, updates): Promise~ChatSession~
+        +deleteSession(sessionId): Promise~void~
+        +archiveSession(sessionId): Promise~void~
+        +restoreSession(sessionId): Promise~void~
+        +addMessage(sessionId, role, content, metadata?): Promise~ChatMessage~
+        +listMessages(sessionId, skip, limit): Promise~MessageList~
+        +summarizeSession(sessionId): Promise~SummaryResponse~
+        +uploadFile(file, collection): Promise~UploadResponse~
+    }
+
+    %% ========== State Management Layer ==========
+    class ChatStore {
+        +currentSession: ChatSession | null
+        +sessions: ChatSession[]
+        +currentMessages: ChatMessage[]
+        +loading: boolean
+        +error: string | null
+        +isUploadingFile: boolean
+        +config: ChatConfig
+        +setCurrentSession(session): void
+        +setSessions(sessions): void
+        +addMessage(message): void
+        +setCurrentMessages(messages): void
+        +setLoading(loading): void
+        +setError(error): void
+        +updateConfig(config): void
+        +setIsUploadingFile(loading): void
+        +clearState(): void
+    }
+
+    %% ========== UI Component Layer ==========
+    class ChatPage {
+        -showSettings: boolean
+        -showSidebar: boolean
+        -messagesEndRef: RefObject
+        +loadSessions(): Promise~void~
+        +loadSession(sessionId): Promise~void~
+        +handleNewChat(): Promise~void~
+        +handleSendMessage(message, files): Promise~void~
+    }
+
+    class ChatSidebar {
+        +isOpen: boolean
+        +onNewChat: Function
+        +onLoadSession: Function
+        +render(): ReactElement
+    }
+
+    class ChatHeader {
+        +onToggleSidebar: Function
+        +onToggleSettings: Function
+        +render(): ReactElement
+    }
+
+    class MessageList {
+        +messages: ChatMessage[]
+        +isLoading: boolean
+        +render(): ReactElement
+    }
+
+    class MessageInput {
+        +onSendMessage: Function
+        +disabled: boolean
+        +render(): ReactElement
+    }
+
+    class SettingsPanel {
+        +onClose: Function
+        +render(): ReactElement
+    }
+
+    class MessageBubble {
+        +message: ChatMessage
+        +render(): ReactElement
+    }
+
+    %% ========== Domain Models ==========
+    class ChatSession {
+        +id: string
+        +user_id: string
+        +title: string
+        +summary?: string
+        +message_count: number
+        +created_at: string
+        +updated_at: string
+        +last_message_at: string
+        +is_archived: boolean
+        +is_deleted: boolean
+    }
+
+    class ChatMessage {
+        +id: string
+        +session_id: string
+        +role: MessageRole
+        +content: string
+        +metadata?: MessageMetadata
+        +created_at: string
+        +edited_at?: string
+        +is_deleted: boolean
+    }
+
+    class ChatRequest {
+        +messages: Message[]
+        +thinking_mode?: ThinkingMode
+        +system_prompt?: string
+        +rag_config?: RAGConfig
+        +web_search_config?: WebSearchConfig
+        +generation_config?: GenerationConfig
+        +collection?: string
+        +stream?: boolean
+        +session_id?: string
+        +auto_generate_title?: boolean
+    }
+
+    class ChatResponse {
+        +message: Message
+        +sources?: DocumentSource[]
+        +web_sources?: WebSource[]
+        +metadata: ResponseMetadata
+        +session_id?: string
+    }
+
+    class ChatConfig {
+        +thinkingMode: ThinkingMode
+        +enableRAG: boolean
+        +enableWebSearch: boolean
+        +temperature: number
+        +maxTokens?: number
+        +topK: number
+        +similarityThreshold: number
+        +collection: string
+    }
+
+    class RAGConfig {
+        +enabled: boolean
+        +top_k: number
+        +similarity_threshold: number
+        +include_sources: boolean
+        +metadata_filter?: Object
+    }
+
+    class WebSearchConfig {
+        +enabled: boolean
+        +max_results: number
+        +timeout: number
+    }
+
+    class GenerationConfig {
+        +temperature: number
+        +max_tokens?: number
+        +top_p: number
+        +frequency_penalty: number
+        +presence_penalty: number
+    }
+
+    %% ========== Relationships ==========
+    ChatPage --> ChatStore : uses
+    ChatPage --> APIClient : uses
+    ChatPage --> ChatSidebar : contains
+    ChatPage --> ChatHeader : contains
+    ChatPage --> MessageList : contains
+    ChatPage --> MessageInput : contains
+    ChatPage --> SettingsPanel : contains
+
+    MessageList --> MessageBubble : contains
+
+    ChatStore --> ChatSession : manages
+    ChatStore --> ChatMessage : manages
+    ChatStore --> ChatConfig : stores
+
+    APIClient --> ChatRequest : sends
+    APIClient --> ChatResponse : receives
+    APIClient --> ChatSession : manages
+    APIClient --> ChatMessage : manages
+
+    ChatRequest --> RAGConfig : contains
+    ChatRequest --> WebSearchConfig : contains
+    ChatRequest --> GenerationConfig : contains
+
+    ChatResponse --> ChatMessage : contains
+```
+
+---
+
+## 5. BIỂU ĐỒ HOẠT ĐỘNG (Activity Diagrams)
+
+### 5.1. Luồng gửi tin nhắn chat
+
+```mermaid
+flowchart TD
+    Start([Người dùng nhập tin nhắn]) --> CheckInput{Kiểm tra input}
+
+    CheckInput -->|Rỗng và không có file| End([Kết thúc])
+    CheckInput -->|Có nội dung hoặc file| SetLoading[Bật trạng thái loading]
+
+    SetLoading --> CheckSession{Có session hiện tại?}
+
+    CheckSession -->|Không| CreateSession[Tạo session mới<br/>POST /chat-history/sessions]
+    CreateSession --> SetSession[Lưu session vào state]
+
+    CheckSession -->|Có| CheckFiles{Có files đính kèm?}
+    SetSession --> CheckFiles
+
+    CheckFiles -->|Có| UploadFiles[Upload files<br/>POST /vectordb/upload/file]
+    CheckFiles -->|Không| AddUserMsg[Thêm tin nhắn user vào UI]
+
+    UploadFiles --> AddUserMsg
+    AddUserMsg --> SaveUserMsg[Lưu tin nhắn user vào DB<br/>POST /chat-history/sessions/:id/messages]
+
+    SaveUserMsg --> PrepareRequest[Chuẩn bị ChatRequest]
+
+    PrepareRequest --> BuildRequest[Xây dựng request object:<br/>- messages: conversation history<br/>- thinking_mode: từ config<br/>- rag_config: từ config<br/>- web_search_config: từ config<br/>- generation_config: từ config<br/>- session_id: current session<br/>- auto_generate_title: true]
+
+    BuildRequest --> SendRequest[Gửi request<br/>POST /generate/chat]
+
+    SendRequest --> WaitResponse[Chờ phản hồi từ server]
+
+    WaitResponse --> CheckError{Có lỗi?}
+
+    CheckError -->|Có| ShowError[Hiển thị thông báo lỗi<br/>setError]
+    CheckError -->|Không| ParseResponse[Parse ChatResponse:<br/>- message.content<br/>- sources<br/>- web_sources<br/>- metadata<br/>- session_id]
+
+    ShowError --> TurnOffLoading[Tắt trạng thái loading]
+
+    ParseResponse --> AddAssistantMsg[Thêm tin nhắn assistant vào UI]
+    AddAssistantMsg --> SaveAssistantMsg[Lưu tin nhắn assistant vào DB<br/>POST /chat-history/sessions/:id/messages]
+
+    SaveAssistantMsg --> UpdateMessages[Cập nhật currentMessages trong state]
+    UpdateMessages --> TurnOffLoading
+
+    TurnOffLoading --> AutoScroll[Tự động scroll xuống cuối]
+    AutoScroll --> End
+
+    style Start fill:#90EE90
+    style End fill:#FFB6C1
+    style CheckError fill:#FFE4B5
+    style ShowError fill:#FF6B6B
+    style SendRequest fill:#87CEEB
+    style SaveUserMsg fill:#DDA0DD
+    style SaveAssistantMsg fill:#DDA0DD
+```
+
+### 5.2. Luồng load phiên chat
+
+```mermaid
+flowchart TD
+    Start([Người dùng click vào session]) --> SetLoading[Bật trạng thái loading]
+
+    SetLoading --> SendRequest[Gửi request lấy session<br/>GET /chat-history/sessions/:id<br/>?include_messages=true]
+
+    SendRequest --> WaitResponse[Chờ phản hồi từ server]
+
+    WaitResponse --> CheckError{Có lỗi?}
+
+    CheckError -->|Có| ShowError[Hiển thị thông báo lỗi]
+    CheckError -->|Không| ParseResponse[Parse response:<br/>- session metadata<br/>- messages array]
+
+    ShowError --> TurnOffLoading[Tắt trạng thái loading]
+
+    ParseResponse --> SetSession[setCurrentSession]
+    SetSession --> SetMessages[setCurrentMessages]
+    SetMessages --> TurnOffLoading
+
+    TurnOffLoading --> ScrollToBottom[Scroll xuống tin nhắn cuối]
+    ScrollToBottom --> End([Kết thúc])
+
+    style Start fill:#90EE90
+    style End fill:#FFB6C1
+    style CheckError fill:#FFE4B5
+    style ShowError fill:#FF6B6B
+    style SendRequest fill:#87CEEB
+```
+
+### 5.3. Luồng tạo phiên chat mới
+
+```mermaid
+flowchart TD
+    Start([Người dùng click 'New Chat']) --> SetLoading[Bật trạng thái loading]
+
+    SetLoading --> SendRequest[Gửi request tạo session<br/>POST /chat-history/sessions<br/>body: title: 'New Chat']
+
+    SendRequest --> WaitResponse[Chờ phản hồi từ server]
+
+    WaitResponse --> CheckError{Có lỗi?}
+
+    CheckError -->|Có| ShowError[Hiển thị thông báo lỗi]
+    CheckError -->|Không| ParseResponse[Parse ChatSession response]
+
+    ShowError --> TurnOffLoading[Tắt trạng thái loading]
+
+    ParseResponse --> SetSession[setCurrentSession<br/>với session mới]
+    SetSession --> ClearMessages[setCurrentMessages<br/>với mảng rỗng]
+    ClearMessages --> TurnOffLoading
+
+    TurnOffLoading --> End([Kết thúc])
+
+    style Start fill:#90EE90
+    style End fill:#FFB6C1
+    style CheckError fill:#FFE4B5
+    style ShowError fill:#FF6B6B
+    style SendRequest fill:#87CEEB
+```
+
+### 5.4. Luồng cập nhật cấu hình chat
+
+```mermaid
+flowchart TD
+    Start([Người dùng mở Settings Panel]) --> ShowPanel[Hiển thị SettingsPanel]
+
+    ShowPanel --> UserChange{Người dùng thay đổi cấu hình}
+
+    UserChange -->|Thinking Mode| UpdateThinking[updateConfig<br/>thinkingMode: value]
+    UserChange -->|Enable RAG| UpdateRAG[updateConfig<br/>enableRAG: value]
+    UserChange -->|Enable Web Search| UpdateWeb[updateConfig<br/>enableWebSearch: value]
+    UserChange -->|Temperature| UpdateTemp[updateConfig<br/>temperature: value]
+    UserChange -->|Top K| UpdateTopK[updateConfig<br/>topK: value]
+    UserChange -->|Similarity Threshold| UpdateSim[updateConfig<br/>similarityThreshold: value]
+    UserChange -->|Collection| UpdateCol[updateConfig<br/>collection: value]
+
+    UpdateThinking --> MergeConfig[Merge với config hiện tại<br/>trong Zustand store]
+    UpdateRAG --> MergeConfig
+    UpdateWeb --> MergeConfig
+    UpdateTemp --> MergeConfig
+    UpdateTopK --> MergeConfig
+    UpdateSim --> MergeConfig
+    UpdateCol --> MergeConfig
+
+    MergeConfig --> UpdateState[Cập nhật state.config]
+    UpdateState --> ReRender[Re-render UI]
+    ReRender --> UserChange
+
+    UserChange -->|Đóng panel| ClosePanel[Đóng SettingsPanel]
+    ClosePanel --> End([Kết thúc])
+
+    style Start fill:#90EE90
+    style End fill:#FFB6C1
+    style MergeConfig fill:#DDA0DD
+```
+
+---
+
+## 6. BIỂU ĐỒ TUẦN TỰ (Sequence Diagrams)
+
+### 6.1. Tuần tự gửi tin nhắn chat
+
+```mermaid
+sequenceDiagram
+    actor User as Người dùng
+    participant UI as ChatPage
+    participant Store as ChatStore
+    participant API as APIClient
+    participant Backend as FastAPI Server
+    participant DB as MongoDB
+
+    User->>UI: Nhập tin nhắn và nhấn Send
+    UI->>UI: handleSendMessage(message, files)
+
+    alt Không có session
+        UI->>API: createSession()
+        API->>Backend: POST /api/v1/chat-history/sessions
+        Backend->>DB: INSERT chat_sessions
+        DB-->>Backend: session_id
+        Backend-->>API: ChatSession
+        API-->>UI: ChatSession
+        UI->>Store: setCurrentSession(session)
+    end
+
+    alt Có files đính kèm
+        loop Mỗi file
+            UI->>API: uploadFile(file, collection)
+            API->>Backend: POST /api/v1/vectordb/upload/file
+            Backend->>Backend: Process & vectorize file
+            Backend->>DB: Save metadata
+            Backend-->>API: UploadResponse
+            API-->>UI: UploadResponse
+        end
+    end
+
+    UI->>Store: addMessage(userMessage)
+    UI->>API: addMessage(session_id, 'user', message)
+    API->>Backend: POST /api/v1/chat-history/sessions/:id/messages
+    Backend->>DB: INSERT chat_messages
+    DB-->>Backend: message_id
+    Backend-->>API: ChatMessage
+    API-->>UI: ChatMessage
+
+    UI->>UI: Chuẩn bị ChatRequest
+    Note over UI: messages, thinking_mode,<br/>rag_config, web_search_config,<br/>generation_config, session_id
+
+    UI->>API: generateChat(request)
+    API->>Backend: POST /api/v1/generate/chat
+
+    Backend->>DB: Load conversation history<br/>(last 10 messages)
+    DB-->>Backend: messages[]
+
+    alt RAG enabled
+        Backend->>Backend: Query Qdrant vector DB
+        Backend->>Backend: Retrieve relevant documents
+    end
+
+    alt Web Search enabled
+        Backend->>Backend: Query web via Firecrawl API
+        Backend->>Backend: Extract web sources
+    end
+
+    Backend->>Backend: Generate response via OpenAI LLM<br/>(with conversation context)
+
+    Backend->>DB: Save user message
+    Backend->>DB: Save assistant message
+
+    alt auto_generate_title == true
+        Backend->>Backend: Check if should generate title<br/>(after 2+ messages)
+        alt Should generate
+            Backend->>Backend: Generate title via LLM
+            Backend->>DB: UPDATE chat_sessions SET title
+        end
+    end
+
+    Backend-->>API: ChatResponse<br/>(message, sources, metadata, session_id)
+    API-->>UI: ChatResponse
+
+    UI->>Store: addMessage(assistantMessage)
+    UI->>API: addMessage(session_id, 'assistant', response)
+    API->>Backend: POST /api/v1/chat-history/sessions/:id/messages
+    Backend->>DB: INSERT chat_messages
+    DB-->>Backend: message_id
+    Backend-->>API: ChatMessage
+    API-->>UI: ChatMessage
+
+    UI->>Store: setCurrentMessages([...messages, userMsg, assistantMsg])
+    UI->>UI: Scroll to bottom
+    UI-->>User: Hiển thị phản hồi
+```
+
+### 6.2. Tuần tự load phiên chat
+
+```mermaid
+sequenceDiagram
+    actor User as Người dùng
+    participant Sidebar as ChatSidebar
+    participant UI as ChatPage
+    participant Store as ChatStore
+    participant API as APIClient
+    participant Backend as FastAPI Server
+    participant DB as MongoDB
+
+    User->>Sidebar: Click vào session trong danh sách
+    Sidebar->>UI: onLoadSession(sessionId)
+    UI->>Store: setLoading(true)
+
+    UI->>API: getSession(sessionId, includeMessages=true)
+    API->>Backend: GET /api/v1/chat-history/sessions/:id<br/>?include_messages=true
+
+    Backend->>DB: SELECT * FROM chat_sessions<br/>WHERE _id = :id AND user_id = :user_id
+    DB-->>Backend: session_doc
+
+    Backend->>DB: SELECT * FROM chat_messages<br/>WHERE session_id = :id<br/>AND is_deleted = false<br/>ORDER BY created_at ASC
+    DB-->>Backend: messages[]
+
+    Backend-->>API: ChatSessionWithMessages<br/>(session + messages)
+    API-->>UI: ChatSessionWithMessages
+
+    UI->>Store: setCurrentSession(session)
+    UI->>Store: setCurrentMessages(messages)
+    UI->>Store: setLoading(false)
+    UI->>UI: Scroll to bottom
+    UI-->>User: Hiển thị tin nhắn
+```
+
+### 6.3. Tuần tự khởi tạo ứng dụng
+
+```mermaid
+sequenceDiagram
+    actor User as Người dùng
+    participant App as React App
+    participant UI as ChatPage
+    participant Store as ChatStore
+    participant API as APIClient
+    participant Backend as FastAPI Server
+    participant DB as MongoDB
+
+    User->>App: Truy cập ứng dụng
+    App->>UI: Mount ChatPage component
+
+    UI->>UI: useEffect(() => loadSessions(), [])
+
+    UI->>API: listSessions(skip=0, limit=50)
+    API->>Backend: GET /api/v1/chat-history/sessions<br/>?skip=0&limit=50
+
+    Backend->>DB: SELECT * FROM chat_sessions<br/>WHERE user_id = :user_id<br/>AND is_deleted = false<br/>ORDER BY last_message_at DESC<br/>LIMIT 50
+    DB-->>Backend: sessions[]
+
+    Backend-->>API: ChatSessionListResponse<br/>(sessions, total, skip, limit)
+    API-->>UI: SessionList
+
+    alt Có sessions
+        UI->>UI: loadSession(sessions[0].id)
+        Note over UI: Load phiên chat đầu tiên<br/>(xem sequence diagram 6.2)
+    end
+
+    UI-->>User: Hiển thị giao diện chat
+```
+
+### 6.4. Tuần tự xóa phiên chat
+
+```mermaid
+sequenceDiagram
+    actor User as Người dùng
+    participant Sidebar as ChatSidebar
+    participant UI as ChatPage
+    participant API as APIClient
+    participant Backend as FastAPI Server
+    participant DB as MongoDB
+
+    User->>Sidebar: Click nút xóa session
+    Sidebar->>UI: onDeleteSession(sessionId)
+
+    UI->>API: deleteSession(sessionId)
+    API->>Backend: DELETE /api/v1/chat-history/sessions/:id
+
+    Backend->>DB: UPDATE chat_sessions<br/>SET is_deleted = true, updated_at = NOW()<br/>WHERE _id = :id AND user_id = :user_id
+    DB-->>Backend: modified_count
+
+    Backend->>DB: UPDATE chat_messages<br/>SET is_deleted = true<br/>WHERE session_id = :id
+    DB-->>Backend: modified_count
+
+    Backend-->>API: {message: "Session deleted successfully"}
+    API-->>UI: Success
+
+    UI->>UI: Reload sessions list
+    UI-->>User: Cập nhật UI
+```
+
+---
+
+## 7. LUỒNG DỮ LIỆU CHI TIẾT
+
+### 7.1. Request Flow: Gửi tin nhắn
+
+**Bước 1: User Input → UI Component**
+```typescript
+// MessageInput.tsx
+const handleSubmit = () => {
+  onSendMessage(inputText, attachedFiles);
+};
+```
+
+**Bước 2: UI Component → ChatPage Handler**
+```typescript
+// Chat.tsx
+const handleSendMessage = async (message: string, files: File[] = []) => {
+  if (!message.trim() && files.length === 0) return;
+
+  setLoading(true);
+
+  // Tạo hoặc lấy session
+  let sessionId = currentSession?.id;
+  if (!sessionId) {
+    const session = await apiClient.createSession();
+    setCurrentSession(session);
+    sessionId = session.id;
+  }
+
+  // Upload files nếu có
+  if (files.length > 0) {
+    for (const file of files) {
+      await apiClient.uploadFile(file, config.collection);
+    }
+  }
+
+  // Thêm tin nhắn user vào UI
+  const userMsg = await apiClient.addMessage(sessionId, 'user', message);
+  setCurrentMessages([...currentMessages, userMsg]);
+
+  // Tạo ChatRequest từ config
+  const request: ChatRequest = {
+    messages: [...currentMessages, { role: 'user', content: message }]
+      .map(m => ({ role: m.role, content: m.content })),
+    thinking_mode: config.thinkingMode,
+    rag_config: {
+      enabled: config.enableRAG,
+      top_k: config.topK,
+      similarity_threshold: config.similarityThreshold,
+      include_sources: true,
     },
-    "embedding": [0.123, 0.456, ...] # Vector 768 chiều
+    web_search_config: {
+      enabled: config.enableWebSearch,
+      max_results: 5,
+      timeout: 30000,
+    },
+    generation_config: {
+      temperature: config.temperature,
+      max_tokens: config.maxTokens,
+      top_p: 1.0,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+    },
+    collection: config.collection,
+    session_id: sessionId,
+    auto_generate_title: true,
+  };
+
+  // Gọi API
+  const response = await apiClient.generateChat(request);
+
+  // Thêm phản hồi vào UI
+  const assistantMsg = await apiClient.addMessage(
+    sessionId,
+    'assistant',
+    response.message.content,
+    response.metadata
+  );
+  setCurrentMessages([...currentMessages, userMsg, assistantMsg]);
+
+  setLoading(false);
+};
+```
+
+**Bước 3: API Client → HTTP Request**
+```typescript
+// client.ts
+async generateChat(request: ChatRequest): Promise<ChatResponse> {
+  const response = await this.client.post<ChatResponse>(
+    '/generate/chat',
+    request
+  );
+  return response.data;
 }
 ```
 
-**Giải thích:**
-- `id`: Unique identifier cho mỗi chunk
-- `document`: Văn bản đã được chunking
-- `metadata`: Thông tin nguồn gốc, danh mục
-- `embedding`: Vector đại diện ngữ nghĩa
+**Bước 4: HTTP Request → Backend API**
+```
+POST /api/v1/generate/chat
+Authorization: Bearer <JWT_TOKEN>
+Content-Type: application/json
 
-### 2.2. User & Conversation Schema (PostgreSQL)
+{
+  "messages": [
+    {"role": "user", "content": "Xin chào"},
+    {"role": "assistant", "content": "Chào bạn! Tôi có thể giúp gì?"},
+    {"role": "user", "content": "PTIT là gì?"}
+  ],
+  "thinking_mode": "balance",
+  "rag_config": {
+    "enabled": true,
+    "top_k": 5,
+    "similarity_threshold": 0.0,
+    "include_sources": true
+  },
+  "web_search_config": {
+    "enabled": false,
+    "max_results": 5,
+    "timeout": 30000
+  },
+  "generation_config": {
+    "temperature": 0.7,
+    "max_tokens": 2000,
+    "top_p": 1.0,
+    "frequency_penalty": 0,
+    "presence_penalty": 0
+  },
+  "collection": "default",
+  "session_id": "674bf12345abcdef67890123",
+  "auto_generate_title": true
+}
+```
 
-#### Table: `users`
-```sql
-CREATE TABLE users (
-    user_id VARCHAR(36) PRIMARY KEY,
-    username VARCHAR(100) UNIQUE NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    full_name VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    is_active BOOLEAN DEFAULT TRUE
+**Bước 5: Backend Processing**
+- Load 10 tin nhắn gần nhất từ MongoDB
+- Query Qdrant vector DB (nếu RAG enabled)
+- Tạo context từ documents
+- Gọi OpenAI API với conversation history
+- Lưu tin nhắn vào MongoDB
+- Auto-generate title (nếu cần)
+
+**Bước 6: Backend → HTTP Response**
+```json
+{
+  "message": {
+    "role": "assistant",
+    "content": "PTIT là Học viện Công nghệ Bưu chính Viễn thông..."
+  },
+  "sources": [
+    {
+      "content": "Học viện Công nghệ Bưu chính Viễn thông...",
+      "metadata": {
+        "file_name": "gioi-thieu-ptit.pdf",
+        "page": 1,
+        "chunk_index": 0,
+        "collection": "default"
+      },
+      "score": 0.92
+    }
+  ],
+  "web_sources": null,
+  "metadata": {
+    "thinking_mode": "balance",
+    "collection": "default",
+    "conversation_turns": 2,
+    "rag_enabled": true,
+    "web_search_enabled": false
+  },
+  "session_id": "674bf12345abcdef67890123"
+}
+```
+
+**Bước 7: Response → UI Update**
+```typescript
+// Chat.tsx
+const assistantMsg = await apiClient.addMessage(
+  sessionId,
+  'assistant',
+  response.message.content,
+  response.metadata
+);
+
+setCurrentMessages([...currentMessages, userMsg, assistantMsg]);
+```
+
+### 7.2. Response Flow: Hiển thị tin nhắn
+
+**Bước 1: State Update**
+```typescript
+// Zustand store
+setCurrentMessages([
+  ...state.currentMessages,
+  newUserMessage,
+  newAssistantMessage
+]);
+```
+
+**Bước 2: Component Re-render**
+```typescript
+// Chat.tsx
+<MessageList messages={currentMessages} isLoading={loading} />
+```
+
+**Bước 3: Render Message Bubbles**
+```typescript
+// MessageList.tsx
+{messages.map((msg) => (
+  <MessageBubble key={msg.id} message={msg} />
+))}
+```
+
+**Bước 4: Display Content**
+```typescript
+// MessageBubble.tsx
+<div className={`message-bubble ${message.role}`}>
+  <div className="message-content">
+    {message.content}
+  </div>
+  {message.metadata?.sources && (
+    <div className="sources">
+      {/* Hiển thị nguồn tài liệu */}
+    </div>
+  )}
+</div>
+```
+
+---
+
+## 8. XỬ LÝ LỖI VÀ VALIDATION
+
+### 8.1. Client-side Validation
+
+```typescript
+// Validation rules
+const validateMessage = (message: string, files: File[]): boolean => {
+  // Kiểm tra tin nhắn rỗng
+  if (!message.trim() && files.length === 0) {
+    return false;
+  }
+
+  // Kiểm tra độ dài tin nhắn
+  if (message.length > 10000) {
+    setError('Tin nhắn quá dài (tối đa 10,000 ký tự)');
+    return false;
+  }
+
+  // Kiểm tra kích thước file
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+  for (const file of files) {
+    if (file.size > MAX_FILE_SIZE) {
+      setError(`File ${file.name} quá lớn (tối đa 10MB)`);
+      return false;
+    }
+  }
+
+  // Kiểm tra định dạng file
+  const ALLOWED_TYPES = [
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'text/plain',
+    'text/markdown',
+    'text/csv',
+    'application/json',
+    'image/jpeg',
+    'image/png',
+  ];
+
+  for (const file of files) {
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      setError(`File ${file.name} không được hỗ trợ`);
+      return false;
+    }
+  }
+
+  return true;
+};
+```
+
+### 8.2. API Error Handling
+
+```typescript
+// API Client error interceptor
+this.client.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response) {
+      // Server trả về lỗi
+      const status = error.response.status;
+      const message = error.response.data?.detail || 'Đã xảy ra lỗi';
+
+      switch (status) {
+        case 400:
+          throw new Error(`Dữ liệu không hợp lệ: ${message}`);
+        case 401:
+          // Xóa token và chuyển đến trang login
+          localStorage.removeItem('auth_token');
+          window.location.href = '/login';
+          throw new Error('Phiên đăng nhập hết hạn');
+        case 403:
+          throw new Error('Không có quyền truy cập');
+        case 404:
+          throw new Error('Không tìm thấy tài nguyên');
+        case 429:
+          throw new Error('Quá nhiều yêu cầu, vui lòng thử lại sau');
+        case 500:
+          throw new Error(`Lỗi server: ${message}`);
+        default:
+          throw new Error(message);
+      }
+    } else if (error.request) {
+      // Request được gửi nhưng không nhận được phản hồi
+      throw new Error('Không thể kết nối đến server');
+    } else {
+      // Lỗi khác
+      throw new Error(error.message);
+    }
+  }
 );
 ```
 
-#### Table: `conversations`
-```sql
-CREATE TABLE conversations (
-    conversation_id VARCHAR(36) PRIMARY KEY,
-    user_id VARCHAR(36) NOT NULL REFERENCES users(user_id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+### 8.3. UI Error Display
+
+```typescript
+// Chat.tsx
+const handleSendMessage = async (message: string, files: File[] = []) => {
+  try {
+    // ... xử lý gửi tin nhắn
+  } catch (error) {
+    const errorMessage = error instanceof Error
+      ? error.message
+      : 'Đã xảy ra lỗi không xác định';
+
+    setError(errorMessage);
+
+    // Tự động ẩn lỗi sau 5 giây
+    setTimeout(() => {
+      setError(null);
+    }, 5000);
+  } finally {
+    setLoading(false);
+  }
+};
+
+// Render error message
+{error && (
+  <div className="error-banner">
+    <span className="error-icon">⚠️</span>
+    <span className="error-message">{error}</span>
+    <button onClick={() => setError(null)}>✕</button>
+  </div>
+)}
+```
+
+---
+
+## 9. BẢO MẬT VÀ XÁC THỰC
+
+### 9.1. JWT Authentication
+
+**Token Storage:**
+```typescript
+// Login thành công
+const loginResponse = await apiClient.login(username, password);
+localStorage.setItem('auth_token', loginResponse.access_token);
+localStorage.setItem('user', JSON.stringify(loginResponse.user));
+```
+
+**Token Injection:**
+```typescript
+// API Client interceptor
+this.client.interceptors.request.use((config) => {
+  const token = localStorage.getItem('auth_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+```
+
+**Token Format:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+### 9.2. CORS Configuration
+
+**Allowed Origins:**
+- `http://localhost:6009` (Frontend dev)
+- `http://localhost:6010` (Alternative)
+- `http://localhost:6008` (Backend)
+
+**Allowed Methods:**
+- GET, POST, PUT, DELETE, OPTIONS, PATCH
+
+**Allowed Headers:**
+- Authorization, Content-Type, Accept
+
+### 9.3. Secure Data Handling
+
+**Không lưu trữ:**
+- Password (chỉ gửi khi login)
+- Sensitive metadata
+
+**Lưu trữ an toàn:**
+- JWT token trong localStorage (auto-expiry sau 24h)
+- User info cơ bản
+
+---
+
+## 10. PERFORMANCE OPTIMIZATION
+
+### 10.1. State Management Optimization
+
+```typescript
+// Sử dụng Zustand với immer middleware
+import { create } from 'zustand';
+import { immer } from 'zustand/middleware/immer';
+
+export const useChatStore = create(
+  immer<ChatState>((set) => ({
+    // ... state
+    addMessage: (message) =>
+      set((state) => {
+        state.currentMessages.push(message);
+      }),
+  }))
 );
 ```
 
-#### Table: `messages`
-```sql
-CREATE TABLE messages (
-    message_id VARCHAR(36) PRIMARY KEY,
-    conversation_id VARCHAR(36) REFERENCES conversations(conversation_id),
-    role VARCHAR(10) NOT NULL, -- 'user' or 'assistant'
-    content TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+### 10.2. Component Memoization
+
+```typescript
+// MessageBubble.tsx
+import { memo } from 'react';
+
+const MessageBubble = memo(({ message }: { message: ChatMessage }) => {
+  return (
+    <div className={`message-bubble ${message.role}`}>
+      {message.content}
+    </div>
+  );
+});
+
+export default MessageBubble;
 ```
 
-#### Table: `responses`
-```sql
-CREATE TABLE responses (
-    response_id VARCHAR(36) PRIMARY KEY,
-    conversation_id VARCHAR(36) REFERENCES conversations(conversation_id),
-    answer TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+### 10.3. Lazy Loading
+
+```typescript
+// App.tsx
+import { lazy, Suspense } from 'react';
+
+const Chat = lazy(() => import('./pages/Chat'));
+const Settings = lazy(() => import('./pages/Settings'));
+
+function App() {
+  return (
+    <Suspense fallback={<LoadingSpinner />}>
+      <Routes>
+        <Route path="/chat" element={<Chat />} />
+        <Route path="/settings" element={<Settings />} />
+      </Routes>
+    </Suspense>
+  );
+}
 ```
 
-#### Table: `response_documents` (Bảng trung gian)
-```sql
-CREATE TABLE response_documents (
-    response_id VARCHAR(36) REFERENCES responses(response_id),
-    document_id VARCHAR(255) NOT NULL, -- ID từ ChromaDB
-    relevance_score FLOAT,
-    ranking INT,
-    PRIMARY KEY (response_id, document_id)
-);
-```
+### 10.4. Debounce User Input
 
-**Giải thích bảng trung gian:**
-- `response_id`: FK tới bảng responses
-- `document_id`: ID của document trong ChromaDB
-- `relevance_score`: Điểm tương đồng cosine (0-1)
-- `ranking`: Thứ hạng trong top-k results (1, 2, 3...)
+```typescript
+// MessageInput.tsx
+import { useDebouncedCallback } from 'use-debounce';
 
----
-
-## 3. THIẾT KẾ LỚP THỰC THỂ
-
-### 3.1. Entity Classes
-
-```mermaid
-classDiagram
-    class User {
-        +String userId
-        +String username
-        +String email
-        +String fullName
-        +DateTime createdAt
-        +boolean isActive
-    }
-
-    class Document {
-        +String id
-        +String content
-        +Map metadata
-        +List~float~ embedding
-    }
-
-    class Query {
-        +String queryId
-        +String userId
-        +String text
-    }
-
-    class ChatResponse {
-        +String responseId
-        +String answer
-        +String conversationId
-    }
-
-    class ResponseDocument {
-        +String responseId
-        +String documentId
-        +float relevanceScore
-        +int ranking
-    }
-
-    class Conversation {
-        +String conversationId
-        +String userId
-        +List~Message~ messages
-    }
-
-    class Message {
-        +String messageId
-        +String role
-        +String content
-    }
-
-    User "1" -- "*" Conversation
-    Conversation "1" *-- "*" Message
-    User "1" -- "*" Query : tạo
-    Query "1" -- "1" ChatResponse : sinh ra
-    ChatResponse "1" -- "*" ResponseDocument
-    Document "1" -- "*" ResponseDocument
-```
-
-### 3.2. Mô tả quan hệ
-
-**Quan hệ chính:**
-
-1. **User - Conversation (1-N)**:
-   - Một user có nhiều conversations
-   - Mỗi conversation thuộc về 1 user
-
-2. **Conversation - Message (1-N, Composition)**:
-   - Một conversation chứa nhiều messages
-   - Message không tồn tại độc lập ngoài conversation (composition)
-
-3. **User - Query (1-N)**:
-   - Một user gửi nhiều queries (câu hỏi)
-   - Mỗi query được tạo bởi 1 user
-
-4. **Query - ChatResponse (1-1)**:
-   - Mỗi query sinh ra 1 response
-   - Response là kết quả trả lời của query
-
-5. **ChatResponse - Document (N-N qua ResponseDocument)**:
-   - **Bảng trung gian**: `ResponseDocument`
-   - Một response tham chiếu nhiều documents (top-k retrieval results)
-   - Một document có thể được dùng trong nhiều responses
-   - Lưu thêm: `relevanceScore` (độ tương đồng), `ranking` (thứ hạng)
-
-6. **ResponseDocument (Association Class)**:
-   - Link giữa ChatResponse và Document
-   - Chứa metadata: điểm relevance, thứ tự ranking
-   - Giúp tracking documents nào được dùng cho response nào
-
-**Luồng dữ liệu:**
-```
-User → Query → [RAG Pipeline] → Vector Search → Document
-                                      ↓
-                                ChatResponse ← ResponseDocument (link docs)
-                                      ↓
-                             Conversation → Message (lưu user query + bot answer)
+const handleTyping = useDebouncedCallback((text: string) => {
+  // Xử lý auto-save draft
+  saveDraft(text);
+}, 1000);
 ```
 
 ---
 
-## 4. KIẾN TRÚC HỆ THỐNG
+## 11. KẾT LUẬN
 
-```mermaid
-graph TB
-    Client["Client 2 - Customer UI"] -->|POST /chat/query| API[RAG API]
+### 11.1. Tóm tắt thiết kế
 
-    API --> Handler[RAG Query Handler]
-    Handler --> Embed[Embedding Service]
-    Embed --> VDB["Vector Store - ChromaDB"]
-    VDB --> Context[Context Builder]
-    Context --> LLM[LLM Service]
-    LLM --> API
-    API --> Client
+Module Chat phía client được thiết kế theo kiến trúc component-based với:
+- **State Management**: Zustand cho quản lý state tập trung
+- **API Layer**: Axios client với interceptors cho authentication
+- **UI Components**: React components tái sử dụng
+- **Type Safety**: TypeScript cho type checking
+- **Error Handling**: Xử lý lỗi toàn diện ở mọi layer
 
-    S1["Server 1 - Training"] -.->|POST /vector/sync| Sync[Vector Sync Manager]
-    Sync --> Embed
-    Embed --> VDB
+### 11.2. Điểm mạnh
 
-    style Handler fill:#90EE90
-    style VDB fill:#90EE90
-    style LLM fill:#90EE90
+1. **Tách biệt rõ ràng**: UI, Logic, API, State
+2. **Type-safe**: TypeScript đảm bảo an toàn kiểu dữ liệu
+3. **Scalable**: Dễ dàng mở rộng thêm tính năng
+4. **Reusable**: Components và hooks có thể tái sử dụng
+5. **Maintainable**: Code dễ đọc, dễ bảo trì
+
+### 11.3. API Endpoints liên quan
+
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| POST | `/api/v1/generate/chat` | Gửi tin nhắn và nhận phản hồi |
+| POST | `/api/v1/chat-history/sessions` | Tạo phiên chat mới |
+| GET | `/api/v1/chat-history/sessions` | Lấy danh sách phiên chat |
+| GET | `/api/v1/chat-history/sessions/:id` | Lấy chi tiết phiên chat |
+| PATCH | `/api/v1/chat-history/sessions/:id` | Cập nhật phiên chat |
+| DELETE | `/api/v1/chat-history/sessions/:id` | Xóa phiên chat |
+| POST | `/api/v1/chat-history/sessions/:id/messages` | Thêm tin nhắn |
+| GET | `/api/v1/chat-history/sessions/:id/messages` | Lấy danh sách tin nhắn |
+| POST | `/api/v1/chat-history/sessions/:id/summarize` | Tạo tóm tắt phiên chat |
+| POST | `/api/v1/vectordb/upload/file` | Upload file |
+
+### 11.4. Data Flow Summary
+
+```
+User Input → UI Component → ChatPage Handler → API Client
+    ↓                                              ↓
+State Update ← Parse Response ← HTTP Response ← Backend API
+    ↓
+Component Re-render → Display to User
 ```
 
 ---
 
-# CHỨC NĂNG 1: USER MANAGEMENT (QUẢN LÝ CUSTOMER USERS)
+## PHU LUC
 
-## 5.1. Thiết kế giao diện
+### A. Cấu trúc thư mục Frontend
 
-### 5.1.1. Server Backend API
+```
+frontend/
+├── src/
+│   ├── api/
+│   │   └── client.ts              # API Client (Axios)
+│   ├── components/
+│   │   └── __ami__/
+│   │       ├── ChatHeader.tsx     # Header component
+│   │       ├── ChatSidebar.tsx    # Sidebar component
+│   │       ├── MessageList.tsx    # Danh sách tin nhắn
+│   │       ├── MessageBubble.tsx  # Tin nhắn đơn
+│   │       ├── MessageInput.tsx   # Ô nhập tin nhắn
+│   │       └── SettingsPanel.tsx  # Panel cấu hình
+│   ├── pages/
+│   │   └── Chat.tsx               # Trang chat chính
+│   ├── store/
+│   │   └── chatStore.ts           # Zustand store
+│   ├── styles/
+│   │   └── __ami__/
+│   │       ├── Chat.css
+│   │       ├── ChatHeader.css
+│   │       └── ChatSidebar.css
+│   └── main.tsx                   # Entry point
+├── package.json
+└── vite.config.ts
+```
 
-#### Endpoint: `POST /api/v1/users` (Tạo user mới)
+### B. Environment Variables
 
-**Request:**
+```env
+# Frontend (.env)
+VITE_API_URL=http://localhost:6008/api/v1
+```
+
+### C. Dependencies
+
 ```json
 {
-    "username": "nguyenvana",
-    "email": "nguyenvana@ptit.edu.vn",
-    "full_name": "Nguyễn Văn A"
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "axios": "^1.6.0",
+    "zustand": "^4.4.0",
+    "lucide-react": "^0.294.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "typescript": "^5.3.0",
+    "vite": "^5.0.0"
+  }
 }
-```
-
-**Response:**
-```json
-{
-    "success": true,
-    "data": {
-        "user_id": "user_123",
-        "username": "nguyenvana",
-        "email": "nguyenvana@ptit.edu.vn",
-        "full_name": "Nguyễn Văn A",
-        "created_at": "2025-01-15T10:30:00Z",
-        "is_active": true
-    }
-}
-```
-
-#### Endpoint: `GET /api/v1/users/{user_id}` (Lấy thông tin user)
-
-**Response:**
-```json
-{
-    "success": true,
-    "data": {
-        "user_id": "user_123",
-        "username": "nguyenvana",
-        "email": "nguyenvana@ptit.edu.vn",
-        "full_name": "Nguyễn Văn A",
-        "created_at": "2025-01-15T10:30:00Z",
-        "is_active": true
-    }
-}
-```
-
-#### Endpoint: `PUT /api/v1/users/{user_id}` (Cập nhật user)
-
-**Request:**
-```json
-{
-    "full_name": "Nguyễn Văn A (Updated)",
-    "email": "nguyenvana_new@ptit.edu.vn"
-}
-```
-
-#### Endpoint: `DELETE /api/v1/users/{user_id}` (Xóa/vô hiệu hóa user)
-
-**Response:**
-```json
-{
-    "success": true,
-    "message": "User deactivated successfully"
-}
-```
-
-### 5.1.2. Admin UI (Lớp ảo - Module 3)
-
-**Giao diện quản lý users:**
-
-```
-┌──────────────────────────────────────────────┐
-│  PTIT Admin - User Management               │
-├──────────────────────────────────────────────┤
-│                                              │
-│  👥 Users List                               │
-│  ┌────────────────────────────────────────┐ │
-│  │ ID      Username    Email       Status │ │
-│  │ user_1  nguyenvana  nva@ptit... Active │ │
-│  │ user_2  tranthib    ttb@ptit... Active │ │
-│  │ user_3  levanc      lvc@ptit... Inactive│ │
-│  └────────────────────────────────────────┘ │
-│                                              │
-│  [Add User] [Search] [Export]               │
-└──────────────────────────────────────────────┘
-```
-
-## 5.2. Thiết kế lớp chi tiết
-
-### 5.2.1. Class Diagram
-
-```mermaid
-classDiagram
-    class AdminUserManagementUI {
-        <<Boundary>>
-        +displayUserList()
-        +showCreateUserForm()
-        +showEditUserForm(userId)
-        +confirmDelete(userId)
-        +renderUserTable(users)
-    }
-
-    class UserController {
-        -UserService userService
-        +createUser(request) UserResponse
-        +getUser(userId) UserResponse
-        +updateUser(userId, request) UserResponse
-        +deleteUser(userId) Response
-        +listUsers(page, limit) UserListResponse
-    }
-
-    class CreateUserRequest {
-        +String username
-        +String email
-        +String fullName
-        +validate() bool
-    }
-
-    class UpdateUserRequest {
-        +String fullName
-        +String email
-        +validate() bool
-    }
-
-    class UserService {
-        -UserRepository userRepository
-        +createUser(userData) User
-        +getUserById(userId) User
-        +updateUser(userId, userData) User
-        +deleteUser(userId) bool
-        +listUsers(page, limit) List~User~
-    }
-
-    class UserRepository {
-        -PostgresDB db
-        +save(user) User
-        +findById(userId) User
-        +findByUsername(username) User
-        +findByEmail(email) User
-        +update(user) User
-        +delete(userId) bool
-    }
-
-    class User {
-        +String userId
-        +String username
-        +String email
-        +String fullName
-        +DateTime createdAt
-        +DateTime updatedAt
-        +boolean isActive
-    }
-
-    class UserResponse {
-        +bool success
-        +User data
-        +toJSON() dict
-    }
-
-    class UserListResponse {
-        +bool success
-        +List~User~ data
-        +int total
-        +int page
-        +toJSON() dict
-    }
-
-    AdminUserManagementUI --> UserController : calls API
-    UserController --> CreateUserRequest : receives
-    UserController --> UpdateUserRequest : receives
-    UserController --> UserService
-    UserService --> UserRepository
-    UserService --> User
-    UserController --> UserResponse : returns
-    UserController --> UserListResponse : returns
-    UserResponse --> User
-    UserListResponse --> User
-    AdminUserManagementUI --> UserResponse : displays
-    AdminUserManagementUI --> UserListResponse : displays
-```
-
-### 5.2.2. Diễn giải thiết kế
-
-**Tại sao có các lớp này:**
-
-1. **AdminUserManagementUI** (Boundary - Lớp giao diện):
-   - **Lý do**: Giao diện web để admin quản lý users (Boundary class trong MVC)
-   - **Trách nhiệm**: Render HTML, handle user interactions, gọi API
-   - **Phương thức**:
-     - `displayUserList()` - hiển thị danh sách users
-     - `showCreateUserForm()` - hiển thị form tạo user
-     - `showEditUserForm()` - hiển thị form sửa user
-     - `confirmDelete()` - hiển thị popup xác nhận xóa
-     - `renderUserTable()` - render bảng users
-
-2. **UserController** (Controller):
-   - **Lý do**: HTTP layer cho user management (MVC pattern)
-   - **Trách nhiệm**: Handle CRUD requests, route đến service
-   - **Phương thức**: `createUser()`, `getUser()`, `updateUser()`, `deleteUser()`, `listUsers()`
-
-3. **CreateUserRequest** (Request DTO):
-   - **Lý do**: Encapsulate dữ liệu tạo user từ HTTP request
-   - **Trách nhiệm**: Validate input (username, email format, required fields)
-   - **Phương thức**: `validate()` - kiểm tra dữ liệu hợp lệ
-
-3. **UpdateUserRequest** (Request DTO):
-   - **Lý do**: Encapsulate dữ liệu cập nhật user
-   - **Trách nhiệm**: Validate input khi update (email format, optional fields)
-   - **Phương thức**: `validate()` - kiểm tra dữ liệu hợp lệ
-
-4. **UserService** (Service):
-   - **Lý do**: Business logic cho user operations (Service pattern)
-   - **Trách nhiệm**: Validate business rules, orchestrate operations
-   - **Phương thức**: `createUser()`, `getUserById()`, `updateUser()`, `deleteUser()`
-
-5. **UserRepository** (Repository):
-   - **Lý do**: Data access layer (Repository pattern)
-   - **Trách nhiệm**: CRUD operations với PostgreSQL
-   - **Phương thức**: `save()`, `findById()`, `findByUsername()`, `update()`, `delete()`
-
-6. **User** (Entity):
-   - **Lý do**: Domain entity
-   - **Trách nhiệm**: Represent user data trong domain model
-
-7. **UserResponse** (Response DTO):
-   - **Lý do**: Standardized response cho single user
-   - **Trách nhiệm**: Serialize user data thành JSON cho client
-   - **Phương thức**: `toJSON()` - convert sang JSON format
-
-8. **UserListResponse** (Response DTO):
-   - **Lý do**: Standardized response cho danh sách users
-   - **Trách nhiệm**: Serialize list users + pagination info
-   - **Phương thức**: `toJSON()` - convert sang JSON format
-
-## 5.3. Biểu đồ hoạt động
-
-### 5.3.1. Tạo User (Create)
-
-```mermaid
-flowchart TD
-    Start([Admin tạo user mới]) --> Validate["UserController: Validate request"]
-    Validate --> CheckUser{"Username đã tồn tại?"}
-    CheckUser -->|Có| Error1["Trả về 400 Bad Request"]
-    Error1 --> End([Kết thúc])
-
-    CheckUser -->|Không| CheckEmail{"Email đã tồn tại?"}
-    CheckEmail -->|Có| Error2["Trả về 400 Bad Request"]
-    Error2 --> End
-
-    CheckEmail -->|Không| CreateUser["UserService: createUser()"]
-    CreateUser --> GenId["Generate user_id (UUID)"]
-    GenId --> Save["UserRepository: save()"]
-    Save --> Return["Trả về UserResponse"]
-    Return --> End
-
-    style Validate fill:#E6F3FF
-    style CreateUser fill:#E6FFE6
-```
-
-### 5.3.2. Cập nhật User (Update)
-
-```mermaid
-flowchart TD
-    Start([Admin cập nhật user]) --> Validate["UserController: Validate request"]
-    Validate --> FindUser["UserService: getUserById()"]
-    FindUser --> UserExists{"User tồn tại?"}
-    UserExists -->|Không| Error1["Trả về 404 Not Found"]
-    Error1 --> End([Kết thúc])
-
-    UserExists -->|Có| EmailChanged{"Email thay đổi?"}
-    EmailChanged -->|Có| CheckEmail["UserRepository: findByEmail()"]
-    CheckEmail --> EmailTaken{"Email đã dùng?"}
-    EmailTaken -->|Có| Error2["Trả về 400 Bad Request"]
-    Error2 --> End
-
-    EmailTaken -->|Không| UpdateUser["UserService: updateUser()"]
-    EmailChanged -->|Không| UpdateUser
-
-    UpdateUser --> SaveUser["UserRepository: update()"]
-    SaveUser --> Return["Trả về UserResponse"]
-    Return --> End
-
-    style Validate fill:#E6F3FF
-    style UpdateUser fill:#E6FFE6
-```
-
-### 5.3.3. Xóa User (Delete)
-
-```mermaid
-flowchart TD
-    Start([Admin xóa user]) --> FindUser["UserService: getUserById()"]
-    FindUser --> UserExists{"User tồn tại?"}
-    UserExists -->|Không| Error["Trả về 404 Not Found"]
-    Error --> End([Kết thúc])
-
-    UserExists -->|Có| DeleteUser["UserService: deleteUser()"]
-    DeleteUser --> SetInactive["Set is_active = false"]
-    SetInactive --> Update["UserRepository: update()"]
-    Update --> Return["Trả về success response"]
-    Return --> End
-
-    style FindUser fill:#E6F3FF
-    style DeleteUser fill:#E6FFE6
-```
-
-## 5.4. Biểu đồ tuần tự
-
-### 5.4.1. Tạo User (Create)
-
-```mermaid
-sequenceDiagram
-    participant Admin as Admin
-    participant AdminUI as Admin UI (Module 3 - Lớp ảo)
-    participant Ctrl as UserController
-    participant Svc as UserService
-    participant Repo as UserRepository
-
-    Admin->>AdminUI: 1. Click "Add User" + nhập thông tin
-    AdminUI->>Ctrl: 2. POST /api/v1/users
-    activate Ctrl
-
-    Ctrl->>Ctrl: 3. Validate request
-    Ctrl->>Svc: 4. createUser(userData)
-    activate Svc
-
-    Svc->>Repo: 5. findByUsername(username)
-    Repo-->>Svc: 6. null (không trùng)
-
-    Svc->>Repo: 7. findByEmail(email)
-    Repo-->>Svc: 8. null (không trùng)
-
-    Svc->>Svc: 9. Generate user_id (UUID)
-    Svc->>Repo: 10. save(user)
-    Repo-->>Svc: 11. User object
-
-    Svc-->>Ctrl: 12. User
-    deactivate Svc
-
-    Ctrl-->>AdminUI: 13. 201 Created + UserResponse
-    deactivate Ctrl
-
-    AdminUI-->>Admin: 14. Hiển thị "User created successfully"
-```
-
-**Mô tả các bước:**
-1. Admin nhập username, email, full_name vào form
-2. Admin UI gửi POST request tới UserController
-3. Controller validate dữ liệu đầu vào (required fields, format)
-4. Controller gọi UserService để xử lý business logic
-5-6. Service kiểm tra username đã tồn tại chưa
-7-8. Service kiểm tra email đã tồn tại chưa
-9. Service tạo UUID cho user_id
-10-11. Repository lưu user vào PostgreSQL
-12. Service trả User object về Controller
-13. Controller wrap trong UserResponse và trả về
-14. UI hiển thị thông báo thành công
-
-### 5.4.2. Cập nhật User (Update)
-
-```mermaid
-sequenceDiagram
-    participant Admin as Admin
-    participant AdminUI as Admin UI (Module 3 - Lớp ảo)
-    participant Ctrl as UserController
-    participant Svc as UserService
-    participant Repo as UserRepository
-
-    Admin->>AdminUI: 1. Click "Edit" + sửa thông tin
-    AdminUI->>Ctrl: 2. PUT /api/v1/users/{user_id}
-    activate Ctrl
-
-    Ctrl->>Ctrl: 3. Validate request
-    Ctrl->>Svc: 4. updateUser(userId, userData)
-    activate Svc
-
-    Svc->>Repo: 5. findById(userId)
-    Repo-->>Svc: 6. User object (existing)
-
-    alt Email thay đổi
-        Svc->>Repo: 7. findByEmail(newEmail)
-        Repo-->>Svc: 8. null (email chưa dùng)
-    end
-
-    Svc->>Svc: 9. Update user properties
-    Svc->>Repo: 10. update(user)
-    Repo-->>Svc: 11. Updated User object
-
-    Svc-->>Ctrl: 12. User
-    deactivate Svc
-
-    Ctrl-->>AdminUI: 13. 200 OK + UserResponse
-    deactivate Ctrl
-
-    AdminUI-->>Admin: 14. Hiển thị "User updated successfully"
-```
-
-**Mô tả các bước:**
-1. Admin click Edit user và sửa thông tin
-2. Admin UI gửi PUT request với user_id
-3. Controller validate dữ liệu (format, allowed fields)
-4. Controller gọi Service để update
-5-6. Service load user hiện tại từ database
-7-8. Nếu email thay đổi, kiểm tra email mới chưa dùng
-9. Service cập nhật các trường được phép (full_name, email)
-10-11. Repository update user trong database
-12. Service trả User object đã update
-13. Controller trả 200 OK + UserResponse
-14. UI hiển thị thông báo cập nhật thành công
-
-### 5.4.3. Xóa User (Delete)
-
-```mermaid
-sequenceDiagram
-    participant Admin as Admin
-    participant AdminUI as Admin UI (Module 3 - Lớp ảo)
-    participant Ctrl as UserController
-    participant Svc as UserService
-    participant Repo as UserRepository
-
-    Admin->>AdminUI: 1. Click "Delete" + xác nhận
-    AdminUI->>Ctrl: 2. DELETE /api/v1/users/{user_id}
-    activate Ctrl
-
-    Ctrl->>Svc: 3. getUserById(userId)
-    activate Svc
-    Svc->>Repo: 4. findById(userId)
-    Repo-->>Svc: 5. User object
-    Svc-->>Ctrl: 6. User
-    deactivate Svc
-
-    Ctrl->>Svc: 7. deleteUser(userId)
-    activate Svc
-
-    Svc->>Repo: 8. findById(userId)
-    Repo-->>Svc: 9. User object
-
-    Svc->>Svc: 10. Set is_active = false
-    Svc->>Repo: 11. update(user)
-    Repo-->>Svc: 12. Updated User
-
-    Svc-->>Ctrl: 13. true
-    deactivate Svc
-
-    Ctrl-->>AdminUI: 14. 200 OK + {"success": true}
-    deactivate Ctrl
-
-    AdminUI-->>Admin: 15. Hiển thị "User deleted successfully"
-```
-
-**Mô tả các bước:**
-1. Admin click Delete và xác nhận trong popup
-2. Admin UI gửi DELETE request với user_id
-3. Controller gọi getUserById() để kiểm tra user tồn tại
-4-5. Repository tìm user trong database
-6. Service trả User object (hoặc throw 404 nếu không tồn tại)
-7. Controller gọi deleteUser() để thực hiện soft delete
-8-9. Service load lại user từ database
-10. Service set is_active = false (soft delete, giữ data)
-11-12. Repository update user trong database
-13. Service trả true (success)
-14. Controller trả 200 OK
-15. UI hiển thị user đã bị xóa thành công
-
----
-
-# CHỨC NĂNG 2: RAG SYSTEM (CHAT, QUẢN LÝ VECTOR DB, ĐỒNG BỘ DOCUMENTS)
-
-## 5.5. Thiết kế giao diện
-
-### 5.5.1. Server Backend API
-
-#### A. Chat API
-
-**Endpoint: `POST /api/v1/chat/query`**
-
-**Request:**
-```json
-{
-    "query": "Học phí ngành CNTT năm 2025 là bao nhiêu?",
-    "user_id": "user_123",
-    "conversation_id": "conv_456"
-}
-```
-
-**Response:**
-```json
-{
-    "success": true,
-    "data": {
-        "answer": "Học phí ngành Công nghệ Thông tin năm 2025 là 12.000.000 VNĐ/năm...",
-        "conversation_id": "conv_456",
-        "sources": [
-            {
-                "doc_id": "doc_001",
-                "content": "Học phí các ngành năm 2025: CNTT: 12tr...",
-                "source": "tuyen_sinh_2025.pdf"
-            }
-        ]
-    }
-}
-```
-
-#### B. Vector Database Statistics API
-
-**Endpoint: `GET /api/v1/vector/stats`**
-
-**Response:**
-```json
-{
-    "success": true,
-    "data": {
-        "total_documents": 10245,
-        "collections": [
-            {
-                "name": "ptit_knowledge_base",
-                "count": 10245,
-                "categories": {
-                    "tuyen_sinh": 3420,
-                    "hoc_phi": 1250,
-                    "chuong_trinh_dao_tao": 5575
-                }
-            }
-        ]
-    }
-}
-```
-
-#### C. Document Sync API (Server-to-Server)
-
-**Endpoint: `POST /api/v1/vector/sync`**
-
-**Request từ Server 1:**
-```json
-{
-    "source": "server1_training",
-    "operation": "upsert",
-    "documents": [
-        {
-            "id": "doc_001",
-            "content": "Nội dung tài liệu...",
-            "metadata": {
-                "source": "file.pdf",
-                "category": "tuyen_sinh"
-            }
-        }
-    ]
-}
-```
-
-**Response:**
-```json
-{
-    "success": true,
-    "data": {
-        "synced_count": 145,
-        "total_vectors": 10390,
-        "sync_time_ms": 3250
-    }
-}
-```
-
-### 5.5.2. Client UI (Lớp ảo - Module 3)
-
-#### A. Customer Chat UI
-
-**Giao diện chat:**
-
-```
-┌────────────────────────────────────────┐
-│  PTIT Chatbot - Tư vấn sinh viên      │
-├────────────────────────────────────────┤
-│                                        │
-│  User: Học phí CNTT 2025 bao nhiêu?   │
-│                                        │
-│  Bot: Học phí ngành Công nghệ Thông   │
-│       tin năm 2025 là 12.000.000      │
-│       VNĐ/năm...                      │
-│                                        │
-│       📄 Nguồn: tuyen_sinh_2025.pdf   │
-│                                        │
-├────────────────────────────────────────┤
-│  [Nhập câu hỏi...]            [Gửi]  │
-└────────────────────────────────────────┘
-```
-
-#### B. Admin Vector Dashboard UI
-
-**Giao diện dashboard:**
-
-```
-┌──────────────────────────────────────────────┐
-│  PTIT Admin - Vector Database Dashboard    │
-├──────────────────────────────────────────────┤
-│                                              │
-│  📊 Statistics                               │
-│  ├─ Total Documents: 10,245                 │
-│  └─ Collections: 1                          │
-│                                              │
-│  📁 Categories                               │
-│  ├─ Tuyển sinh: 3,420 (33%)                │
-│  ├─ Học phí: 1,250 (12%)                   │
-│  └─ Đào tạo: 5,575 (55%)                   │
-│                                              │
-│  ⚙️ Actions                                  │
-│  [View Documents] [Refresh Stats]           │
-└──────────────────────────────────────────────┘
-```
-
-## 5.6. Thiết kế lớp chi tiết
-
-### 5.6.1. Class Diagram
-
-```mermaid
-classDiagram
-    %% ========== CHAT FUNCTIONALITY ==========
-    class CustomerChatUI {
-        <<Boundary>>
-        +displayChatInterface()
-        +sendMessage(query)
-        +displayAnswer(response)
-        +displaySources(sources)
-        +loadHistory(conversationId)
-        +renderChatBubble(message)
-    }
-
-    class ChatController {
-        -RAGQueryHandler ragHandler
-        +postQuery(request) ChatResponse
-        +getConversationHistory(userId, convId) ConversationHistoryResponse
-    }
-
-    class QueryRequest {
-        +String query
-        +String userId
-        +String conversationId
-        +validate() bool
-    }
-
-    class RAGQueryHandler {
-        -VectorStore vectorStore
-        -EmbeddingService embeddingService
-        -LLMService llmService
-        -ContextBuilder contextBuilder
-        -ConversationManager conversationManager
-        +processQuery(query: Query) ChatResponse
-    }
-
-    class Query {
-        +String queryId
-        +String userId
-        +String conversationId
-        +String text
-    }
-
-    class ChatResponse {
-        +bool success
-        +String answer
-        +String conversationId
-        +List~SourceDocument~ sources
-        +toJSON() dict
-    }
-
-    class SourceDocument {
-        +String docId
-        +String content
-        +String source
-        +float relevanceScore
-    }
-
-    class ConversationHistoryResponse {
-        +bool success
-        +List~Message~ messages
-        +String conversationId
-        +toJSON() dict
-    }
-
-    class ContextBuilder {
-        -ConversationManager convManager
-        +build(query, documents, convId) String
-    }
-
-    class ConversationManager {
-        -PostgresDB db
-        +saveMessage(convId, message) void
-        +getHistory(convId, limit) List~Message~
-        +createConversation(userId) String
-    }
-
-    %% ========== VECTOR STATS FUNCTIONALITY ==========
-    class AdminVectorDashboardUI {
-        <<Boundary>>
-        +displayDashboard()
-        +showCollectionStats()
-        +refreshStats()
-        +renderStatsTable(stats)
-        +searchVectors(query)
-    }
-
-    class VectorController {
-        -VectorStatsService statsService
-        +getStats() VectorStatsResponse
-        +postSearchVectors(request) VectorSearchResponse
-    }
-
-    class VectorStatsService {
-        -VectorStore vectorStore
-        +getStatistics() VectorStats
-        +searchVectors(query, topK) List~Document~
-    }
-
-    class VectorStats {
-        +int totalDocuments
-        +int totalCollections
-        +List~CollectionInfo~ collections
-        +toJSON() dict
-    }
-
-    class CollectionInfo {
-        +String name
-        +int documentCount
-        +int dimension
-    }
-
-    class VectorStatsResponse {
-        +bool success
-        +VectorStats stats
-        +toJSON() dict
-    }
-
-    class VectorSearchResponse {
-        +bool success
-        +List~Document~ results
-        +toJSON() dict
-    }
-
-    %% ========== DOCUMENT SYNC FUNCTIONALITY ==========
-    class SyncController {
-        -VectorSyncManager syncManager
-        +postSync(request) SyncResponse
-    }
-
-    class SyncRequest {
-        +List~String~ documentUrls
-        +String collectionName
-        +dict metadata
-        +validate() bool
-    }
-
-    class VectorSyncManager {
-        -VectorStore vectorStore
-        -DocumentProcessor processor
-        -EmbeddingService embeddingService
-        +syncDocuments(urls, collection) SyncResult
-    }
-
-    class DocumentProcessor {
-        -ChunkingStrategy strategy
-        +processDocument(url) Document
-        +splitIntoChunks(document) List~Chunk~
-    }
-
-    class ChunkingStrategy {
-        <<interface>>
-        +chunk(text, chunkSize) List~String~
-    }
-
-    class SentenceChunker {
-        +chunk(text, chunkSize) List~String~
-    }
-
-    class TokenChunker {
-        +chunk(text, chunkSize) List~String~
-    }
-
-    class SyncResponse {
-        +bool success
-        +int documentsProcessed
-        +int chunksCreated
-        +List~String~ errors
-        +toJSON() dict
-    }
-
-    %% ========== SHARED COMPONENTS ==========
-    class VectorStore {
-        -ChromaDB client
-        +search(embedding, topK) List~Document~
-        +insert(documents, embeddings) void
-        +getStats() dict
-        +getCollections() List~String~
-    }
-
-    class EmbeddingService {
-        -SentenceTransformer model
-        +embed(text) List~float~
-        +batchEmbed(texts) List~List~float~~
-    }
-
-    class LLMService {
-        -OpenAI client
-        +generate(prompt) String
-    }
-
-    %% ========== RELATIONSHIPS - CHAT ==========
-    CustomerChatUI --> ChatController : calls API
-    ChatController --> QueryRequest : receives
-    ChatController --> RAGQueryHandler
-    RAGQueryHandler --> Query
-    RAGQueryHandler --> ChatResponse : returns
-    ChatController --> ChatResponse : returns
-    ChatController --> ConversationHistoryResponse : returns
-    ChatResponse --> SourceDocument
-    RAGQueryHandler --> ContextBuilder
-    RAGQueryHandler --> ConversationManager
-    CustomerChatUI --> ChatResponse : displays
-    CustomerChatUI --> ConversationHistoryResponse : displays
-    RAGQueryHandler --> VectorStore
-    RAGQueryHandler --> EmbeddingService
-    RAGQueryHandler --> LLMService
-
-    %% ========== RELATIONSHIPS - VECTOR STATS ==========
-    AdminVectorDashboardUI --> VectorController : calls API
-    VectorController --> VectorStatsService
-    VectorStatsService --> VectorStore
-    VectorStatsService --> VectorStats : returns
-    VectorStats --> CollectionInfo
-    VectorController --> VectorStatsResponse : returns
-    VectorController --> VectorSearchResponse : returns
-    AdminVectorDashboardUI --> VectorStatsResponse : displays
-    VectorStatsService --> EmbeddingService
-
-    %% ========== RELATIONSHIPS - DOCUMENT SYNC ==========
-    SyncController --> SyncRequest : receives
-    SyncController --> VectorSyncManager
-    VectorSyncManager --> DocumentProcessor
-    VectorSyncManager --> VectorStore
-    VectorSyncManager --> EmbeddingService
-    DocumentProcessor --> ChunkingStrategy
-    ChunkingStrategy <|.. SentenceChunker : implements
-    ChunkingStrategy <|.. TokenChunker : implements
-    SyncController --> SyncResponse : returns
-```
-
-### 5.6.2. Diễn giải thiết kế
-
-**Tại sao có các lớp này:**
-
-#### A. CHAT FUNCTIONALITY
-
-1. **CustomerChatUI** (Boundary - Lớp giao diện):
-   - **Lý do**: Giao diện web chat cho customer (Boundary class)
-   - **Trách nhiệm**: Render chat interface, handle user input, display responses
-   - **Phương thức**:
-     - `displayChatInterface()` - hiển thị giao diện chat
-     - `sendMessage()` - gửi câu hỏi đến server
-     - `displayAnswer()` - hiển thị câu trả lời từ bot
-     - `displaySources()` - hiển thị nguồn tài liệu tham khảo
-     - `loadHistory()` - load lịch sử chat
-     - `renderChatBubble()` - render từng message bubble
-
-2. **ChatController** (Controller):
-   - **Lý do**: HTTP layer cho chat operations (MVC pattern)
-   - **Trách nhiệm**: Handle chat requests, route đến RAG handler
-   - **Phương thức**: `postQuery()`, `getConversationHistory()`
-
-3. **QueryRequest** (Request DTO):
-   - **Lý do**: Encapsulate chat query từ HTTP request
-   - **Trách nhiệm**: Validate input (query text required, userId, conversationId)
-   - **Phương thức**: `validate()` - kiểm tra query không empty
-
-4. **RAGQueryHandler** (Facade):
-   - **Lý do**: Điều phối toàn bộ RAG pipeline (Facade pattern)
-   - **Trách nhiệm**: Orchestrate: embed → search → build context → generate
-   - **Phương thức**: `processQuery()` - main RAG workflow
-
-5. **Query** (Value Object):
-   - **Lý do**: Domain object đại diện cho câu hỏi
-   - **Trách nhiệm**: Encapsulate query information, immutable
-
-6. **ChatResponse** (Response DTO):
-   - **Lý do**: Standardized response cho chat query
-   - **Trách nhiệm**: Serialize answer + sources thành JSON
-   - **Phương thức**: `toJSON()` - convert sang JSON format
-
-7. **SourceDocument** (DTO):
-   - **Lý do**: Represent document source trong response
-   - **Trách nhiệm**: Chứa thông tin document được retrieve (id, content, source file, score)
-
-8. **ConversationHistoryResponse** (Response DTO):
-   - **Lý do**: Standardized response cho lịch sử hội thoại
-   - **Trách nhiệm**: Serialize conversation history thành JSON
-   - **Phương thức**: `toJSON()`
-
-9. **ContextBuilder** (Builder):
-   - **Lý do**: Build prompt cho LLM (Builder pattern)
-   - **Trách nhiệm**: Format documents + conversation history → final prompt
-   - **Phương thức**: `build()` - tạo prompt string
-
-10. **ConversationManager** (Repository):
-    - **Lý do**: Quản lý conversation persistence (Repository pattern)
-    - **Trách nhiệm**: CRUD operations cho conversations với PostgreSQL
-    - **Phương thức**: `saveMessage()`, `getHistory()`, `createConversation()`
-
-#### B. VECTOR STATS FUNCTIONALITY
-
-11. **AdminVectorDashboardUI** (Boundary - Lớp giao diện):
-    - **Lý do**: Giao diện admin dashboard cho thống kê vector DB (Boundary class)
-    - **Trách nhiệm**: Hiển thị thống kê, search vectors, refresh data
-    - **Phương thức**:
-      - `displayDashboard()` - hiển thị dashboard
-      - `showCollectionStats()` - hiển thị stats từng collection
-      - `refreshStats()` - làm mới dữ liệu
-      - `renderStatsTable()` - render bảng thống kê
-      - `searchVectors()` - tìm kiếm vectors
-
-12. **VectorController** (Controller):
-    - **Lý do**: HTTP layer cho vector stats operations (MVC pattern)
-    - **Trách nhiệm**: Handle stats requests, route đến service
-    - **Phương thức**: `getStats()`, `postSearchVectors()`
-
-13. **VectorStatsService** (Service):
-    - **Lý do**: Business logic cho việc lấy thống kê vector DB
-    - **Trách nhiệm**: Gọi VectorStore để lấy stats, search vectors
-    - **Phương thức**: `getStatistics()`, `searchVectors()`
-
-14. **VectorStats** (Value Object):
-    - **Lý do**: Encapsulate thông tin thống kê vector DB
-    - **Trách nhiệm**: Chứa total documents, collections, collection info
-    - **Phương thức**: `toJSON()`
-
-15. **CollectionInfo** (Value Object):
-    - **Lý do**: Represent thông tin từng collection
-    - **Trách nhiệm**: Chứa name, document count, dimension
-
-16. **VectorStatsResponse** (Response DTO):
-    - **Lý do**: Standardized response cho stats request
-    - **Trách nhiệm**: Serialize stats thành JSON
-    - **Phương thức**: `toJSON()`
-
-17. **VectorSearchResponse** (Response DTO):
-    - **Lý do**: Standardized response cho vector search
-    - **Trách nhiệm**: Serialize search results thành JSON
-    - **Phương thức**: `toJSON()`
-
-#### C. DOCUMENT SYNC FUNCTIONALITY
-
-18. **SyncController** (Controller):
-    - **Lý do**: HTTP layer cho document sync operations (MVC pattern)
-    - **Trách nhiệm**: Handle sync requests từ Server 1, route đến manager
-    - **Phương thức**: `postSync()`
-
-19. **SyncRequest** (Request DTO):
-    - **Lý do**: Encapsulate document sync request từ Server 1
-    - **Trách nhiệm**: Validate input (documentUrls, collectionName)
-    - **Phương thức**: `validate()`
-
-20. **VectorSyncManager** (Facade):
-    - **Lý do**: Điều phối toàn bộ document sync pipeline (Facade pattern)
-    - **Trách nhiệm**: Orchestrate: process → chunk → embed → insert
-    - **Phương thức**: `syncDocuments()`
-
-21. **DocumentProcessor** (Service):
-    - **Lý do**: Xử lý documents (load, clean, chunk)
-    - **Trách nhiệm**: Load document từ URL, split thành chunks
-    - **Phương thức**: `processDocument()`, `splitIntoChunks()`
-
-22. **ChunkingStrategy** (Strategy Interface):
-    - **Lý do**: Strategy pattern cho việc chunking documents
-    - **Trách nhiệm**: Define interface cho các chiến lược chunking khác nhau
-    - **Phương thức**: `chunk()`
-
-23. **SentenceChunker** (Strategy Implementation):
-    - **Lý do**: Chunking theo câu (sentence-based)
-    - **Trách nhiệm**: Split text theo sentence boundaries
-    - **Phương thức**: `chunk()`
-
-24. **TokenChunker** (Strategy Implementation):
-    - **Lý do**: Chunking theo token count
-    - **Trách nhiệm**: Split text theo số tokens với overlap
-    - **Phương thức**: `chunk()`
-
-25. **SyncResponse** (Response DTO):
-    - **Lý do**: Standardized response cho sync request
-    - **Trách nhiệm**: Serialize sync results (documents processed, chunks created, errors)
-    - **Phương thức**: `toJSON()`
-
-#### D. SHARED COMPONENTS
-
-26. **VectorStore** (Repository):
-    - **Lý do**: Abstraction layer cho ChromaDB (Repository pattern)
-    - **Trách nhiệm**: CRUD operations với vector database
-    - **Phương thức**: `search()`, `insert()`, `getStats()`, `getCollections()`
-
-27. **EmbeddingService** (Service):
-    - **Lý do**: Service cho việc tạo embeddings
-    - **Trách nhiệm**: Convert text → vector embeddings (768-dim)
-    - **Phương thức**: `embed()`, `batchEmbed()`
-
-28. **LLMService** (Service):
-    - **Lý do**: Service cho việc gọi LLM (OpenAI hoặc Local)
-    - **Trách nhiệm**: Generate answer từ prompt
-    - **Phương thức**: `generate()`
-
-## 5.7. Biểu đồ hoạt động
-
-### 5.7.1. Chat Query Processing
-
-```mermaid
-flowchart TD
-    Start([User gửi câu hỏi]) --> Validate["ChatController: Validate request"]
-    Validate --> Embed["EmbeddingService: embed query"]
-    Embed --> Search["VectorStore: search (top_k=5)"]
-    Search --> HasResults{"Tìm thấy documents?"}
-
-    HasResults -->|Không| DefaultResp["Trả về: 'Không tìm thấy thông tin'"]
-    DefaultResp --> End([Kết thúc])
-
-    HasResults -->|Có| LoadConv{"Có conversation_id?"}
-    LoadConv -->|Có| GetHistory["ConversationManager: getHistory"]
-    GetHistory --> BuildCtx
-    LoadConv -->|Không| BuildCtx["ContextBuilder: build prompt"]
-
-    BuildCtx --> Generate["LLMService: generate answer"]
-    Generate --> SaveMsg["ConversationManager: saveMessage"]
-    SaveMsg --> Return["Trả về ChatResponse"]
-    Return --> End
-
-    style Embed fill:#E6F3FF
-    style Generate fill:#E6FFE6
-```
-
-### 5.7.2. Vector Stats Retrieval
-
-```mermaid
-flowchart TD
-    Start([Admin yêu cầu stats]) --> Validate["VectorController: Validate request"]
-    Validate --> GetStats["VectorStatsService: getStatistics()"]
-    GetStats --> Query["VectorStore: getStats()"]
-    Query --> GetColls["VectorStore: getCollections()"]
-    GetColls --> Loop["Loop qua từng collection"]
-
-    Loop --> GetCount["Lấy document count"]
-    GetCount --> GetDim["Lấy dimension"]
-    GetDim --> NextColl{"Còn collection?"}
-
-    NextColl -->|Có| Loop
-    NextColl -->|Không| Build["Build VectorStats object"]
-    Build --> Return["Trả về VectorStatsResponse"]
-    Return --> End([Kết thúc])
-
-    style Query fill:#E6F3FF
-    style Build fill:#E6FFE6
-```
-
-### 5.7.3. Document Sync Processing
-
-```mermaid
-flowchart TD
-    Start([Server 1 gửi sync request]) --> Validate["SyncController: Validate request"]
-    Validate --> Loop["Loop qua từng document URL"]
-
-    Loop --> Download["DocumentProcessor: processDocument(url)"]
-    Download --> DownloadOK{"Download thành công?"}
-
-    DownloadOK -->|Không| LogError["Log error"]
-    LogError --> NextDoc
-
-    DownloadOK -->|Có| Chunk["DocumentProcessor: splitIntoChunks()"]
-    Chunk --> Strategy["ChunkingStrategy: chunk()"]
-    Strategy --> Embed["EmbeddingService: batchEmbed(chunks)"]
-    Embed --> Insert["VectorStore: insert(chunks, embeddings)"]
-    Insert --> NextDoc{"Còn document?"}
-
-    NextDoc -->|Có| Loop
-    NextDoc -->|Không| BuildResp["Build SyncResponse"]
-    BuildResp --> Return["Trả về kết quả"]
-    Return --> End([Kết thúc])
-
-    style Embed fill:#E6F3FF
-    style Insert fill:#E6FFE6
-```
-
-## 5.8. Biểu đồ tuần tự
-
-### 5.8.1. Chat Query Processing
-
-```mermaid
-sequenceDiagram
-    participant User as User
-    participant ClientUI as Client UI (Module 3 - Lớp ảo)
-    participant Controller as ChatController
-    participant RAG as RAGQueryHandler
-    participant Embed as EmbeddingService
-    participant VDB as VectorStore
-    participant Context as ContextBuilder
-    participant Conv as ConversationManager
-    participant LLM as LLMService
-
-    User->>ClientUI: 1. Nhập câu hỏi + click Gửi
-    ClientUI->>Controller: 2. POST /chat/query
-    activate Controller
-
-    Controller->>RAG: 3. processQuery(query)
-    activate RAG
-
-    RAG->>Embed: 4. embed(query.text)
-    Embed-->>RAG: 5. embedding vector [768 dims]
-
-    RAG->>VDB: 6. search(embedding, top_k=5)
-    VDB-->>RAG: 7. Top-5 documents + scores
-
-    RAG->>Context: 8. build(query, documents, conv_id)
-    activate Context
-    Context->>Conv: 9. getHistory(conv_id, limit=5)
-    Conv-->>Context: 10. Last 5 messages
-    Context->>Context: 11. Format prompt template
-    Context-->>RAG: 12. Final prompt string
-    deactivate Context
-
-    RAG->>LLM: 13. generate(prompt)
-    LLM-->>RAG: 14. Answer text
-
-    RAG->>Conv: 15. saveMessage(user_msg, bot_msg)
-    Conv-->>RAG: 16. Success
-
-    RAG-->>Controller: 17. ChatResponse + sources
-    deactivate RAG
-
-    Controller-->>ClientUI: 18. 200 OK + JSON
-    deactivate Controller
-    ClientUI-->>User: 19. Hiển thị answer + nguồn
-```
-
-**Mô tả các bước:**
-1. User nhập câu hỏi và nhấn nút Gửi
-2. Client UI gửi POST request tới ChatController
-3. Controller gọi RAGQueryHandler để xử lý RAG pipeline
-4-5. Embedding service convert query thành vector 768 chiều
-6-7. Vector store tìm kiếm 5 documents gần nhất (cosine similarity)
-8. ContextBuilder nhận query + documents + conversation_id
-9-10. ContextBuilder load 5 messages cuối từ ConversationManager
-11. ContextBuilder format: system prompt + context + history + query
-12. Trả final prompt string cho RAGQueryHandler
-13-14. LLM service generate answer từ prompt
-15-16. ConversationManager lưu cả user message và bot message
-17. RAGQueryHandler trả ChatResponse (answer + sources)
-18. Controller trả 200 OK với JSON response
-19. Client UI hiển thị answer và nguồn tài liệu tham khảo
-
-### 5.8.2. Vector Stats Retrieval
-
-```mermaid
-sequenceDiagram
-    participant Admin as Admin
-    participant AdminUI as Admin Dashboard UI (Module 3 - Lớp ảo)
-    participant Controller as VectorController
-    participant Service as VectorStatsService
-    participant VDB as VectorStore
-
-    Admin->>AdminUI: 1. Truy cập dashboard + click Refresh
-    AdminUI->>Controller: 2. GET /vector/stats
-    activate Controller
-
-    Controller->>Service: 3. getStatistics()
-    activate Service
-
-    Service->>VDB: 4. getStats()
-    VDB-->>Service: 5. Total documents count
-
-    Service->>VDB: 6. getCollections()
-    VDB-->>Service: 7. List collection names
-
-    loop Từng collection
-        Service->>VDB: 8. getCollectionInfo(name)
-        VDB-->>Service: 9. Count + dimension
-    end
-
-    Service->>Service: 10. Build VectorStats object
-    Service-->>Controller: 11. VectorStats
-    deactivate Service
-
-    Controller->>Controller: 12. Build VectorStatsResponse
-    Controller-->>AdminUI: 13. 200 OK + JSON
-    deactivate Controller
-    AdminUI-->>Admin: 14. Hiển thị stats table
-```
-
-**Mô tả các bước:**
-1. Admin truy cập dashboard và click nút Refresh để làm mới stats
-2. Admin UI gửi GET request tới VectorController
-3. Controller gọi VectorStatsService để lấy thống kê
-4-5. Service lấy tổng số documents từ VectorStore
-6-7. Service lấy danh sách tên collections
-8-9. Loop qua từng collection, lấy document count và dimension
-10. Service build VectorStats object với tất cả thông tin
-11. Service trả VectorStats về Controller
-12. Controller tạo VectorStatsResponse (DTO)
-13. Controller trả 200 OK với JSON response
-14. Admin UI render bảng thống kê với số liệu real-time
-
-### 5.8.3. Document Sync Processing
-
-```mermaid
-sequenceDiagram
-    participant Server1 as Server 1 (Module 1)
-    participant Controller as SyncController
-    participant Manager as VectorSyncManager
-    participant Processor as DocumentProcessor
-    participant Strategy as ChunkingStrategy
-    participant Embed as EmbeddingService
-    participant VDB as VectorStore
-
-    Server1->>Controller: 1. POST /vector/sync + documentUrls
-    activate Controller
-
-    Controller->>Controller: 2. Validate SyncRequest
-    Controller->>Manager: 3. syncDocuments(urls, collection)
-    activate Manager
-
-    loop Từng document URL
-        Manager->>Processor: 4. processDocument(url)
-        activate Processor
-        Processor->>Processor: 5. Download document content
-        Processor->>Strategy: 6. chunk(text, chunkSize=512)
-        Strategy-->>Processor: 7. List of chunks
-        deactivate Processor
-        Processor-->>Manager: 8. Document + chunks
-
-        Manager->>Embed: 9. batchEmbed(chunks)
-        Embed-->>Manager: 10. List of embeddings
-
-        Manager->>VDB: 11. insert(chunks, embeddings, metadata)
-        VDB-->>Manager: 12. Success
-    end
-
-    Manager->>Manager: 13. Build SyncResponse (count, errors)
-    Manager-->>Controller: 14. SyncResponse
-    deactivate Manager
-
-    Controller-->>Server1: 15. 200 OK + JSON
-    deactivate Controller
-```
-
-**Mô tả các bước:**
-1. Server 1 gửi POST request với danh sách document URLs cần sync
-2. Controller validate SyncRequest (urls không empty, collection name valid)
-3. Controller gọi VectorSyncManager để xử lý sync pipeline
-4. Manager loop qua từng URL, gọi DocumentProcessor
-5. Processor download nội dung document từ URL
-6-7. Processor dùng ChunkingStrategy để split text thành chunks (512 tokens)
-8. Processor trả document đã xử lý và danh sách chunks
-9-10. Manager gọi EmbeddingService để tạo embeddings cho tất cả chunks (batch)
-11-12. Manager insert chunks + embeddings + metadata vào VectorStore (ChromaDB)
-13. Manager build SyncResponse với số documents processed, chunks created, errors
-14. Manager trả SyncResponse về Controller
-15. Controller trả 200 OK với JSON response về Server 1
-
----
-
-
-## 6. TƯƠNG TÁC VỚI CÁC MODULE KHÁC
-
-```mermaid
-graph TB
-    subgraph "Server 1 - Training (Module 1 - Lớp ảo)"
-        S1[Training API]
-        DB1[(Training DB)]
-        S1 --> DB1
-    end
-
-    subgraph "Server 2 - RAG (Module 2 - Bạn làm)"
-        S2[RAG API]
-        VDB[(ChromaDB)]
-        PG[(PostgreSQL)]
-        S2 --> VDB
-        S2 --> PG
-    end
-
-    subgraph "Client - UI & Auth (Module 3 - Lớp ảo)"
-        Auth[Auth Service]
-        Admin[Admin UI]
-        Customer[Customer UI]
-        DB2[(User DB)]
-        Auth --> DB2
-    end
-
-    S1 -->|POST /vector/sync| S2
-    Customer -->|POST /chat/query| S2
-    Admin -->|GET /vector/stats| S2
-    S2 -.->|Verify token| Auth
-
-    style S2 fill:#90EE90
-    style VDB fill:#90EE90
-    style PG fill:#90EE90
-```
-
-**Module 2 cần từ Module 1:**
-- `POST /vector/sync`: Nhận documents để đồng bộ
-
-**Module 2 cần từ Module 3:**
-- `POST /auth/verify`: Verify JWT token
-
-**Module 2 cung cấp cho Module 3:**
-- `POST /chat/query`: Chat API
-- `GET /vector/stats`: Admin statistics
-- `GET /conversations/{user_id}`: Lấy lịch sử chat
-
----
-
-## 7. PROMPT ENGINEERING
-
-### 7.1. Prompt Template
-
-```python
-SYSTEM_PROMPT = """Bạn là chatbot tư vấn của PTIT.
-Nhiệm vụ: Trả lời câu hỏi dựa trên thông tin được cung cấp.
-Nguyên tắc:
-- Chỉ trả lời dựa trên context
-- Nếu không có thông tin, nói rõ "Tôi không tìm thấy thông tin này"
-- Trả lời ngắn gọn, chính xác"""
-
-USER_PROMPT_TEMPLATE = """
-Context (Tài liệu tìm được):
-{retrieved_documents}
-
-Lịch sử hội thoại:
-{conversation_history}
-
-Câu hỏi: {user_query}
-
-Trả lời:"""
-```
-
-### 7.2. Context Building
-
-```mermaid
-flowchart LR
-    A[Vector Search] --> B[Top 5 documents]
-    B --> C[Get conversation history]
-    C --> D[Format prompt template]
-    D --> E[Send to LLM]
 ```
 
 ---
 
-## 8. KẾT LUẬN
-
-Module 2 là **trung tâm xử lý RAG**:
-
-### 8.1. Tổng kết
-- ✅ **2 chức năng chính**:
-  - **User Management**: Quản lý customer users (CRUD operations)
-  - **RAG System**: Tích hợp 3 chức năng con (Chat với user, Quản lý vector DB, Đồng bộ documents)
-- ✅ **Mỗi chức năng có**:
-  - Thiết kế giao diện (Server API + Client UI mockup với Boundary classes)
-  - Class diagram chi tiết + diễn giải lý do thiết kế
-  - Activity diagram (luồng xử lý chi tiết cho từng operation)
-  - Sequence diagram với đánh số bước + mô tả (không có chi tiết database queries)
-- ✅ **Tương tác module**:
-  - Nhận document sync từ Server 1
-  - Cung cấp Chat API và Vector Stats cho Module 3
-  - Verify JWT token với Auth service (Module 3)
-- ✅ **CSDL**:
-  - ChromaDB (vector embeddings)
-  - PostgreSQL (users, conversations, messages, responses, response_documents)
-
-### 8.2. Technology Stack
-
-```
-Backend:       FastAPI
-Vector DB:     ChromaDB
-Database:      PostgreSQL
-LLM:           OpenAI API / Local LLM
-Embedding:     sentence-transformers
-```
-
-### 8.3. Design Patterns
-
-- **MVC**: ChatController, VectorController, SyncController
-- **Facade**: RAGQueryHandler, VectorSyncManager
-- **Strategy**: ChunkingStrategy (SentenceChunker, TokenChunker)
-- **Repository**: ConversationManager
-- **DTO**: ChatResponse, VectorStats, SyncResponse
-- **Value Object**: Query, CollectionInfo
-
----
-
-**Ngày hoàn thành:** [Ngày/Tháng/Năm]
-**Chữ ký:** _______________
+**Người thiết kế**: AMI Development Team
+**Ngày tạo**: 2025-01-25
+**Phiên bản**: 1.0.0
+**Trạng thái**: Approved
